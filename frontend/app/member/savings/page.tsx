@@ -2,125 +2,67 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Navbar from '@/components/Navbar';
+import AppShell from '@/components/AppShell';
 import { contributionService } from '@/services';
+import type { Contribution } from '@/types';
+import { formatCurrency } from '@/lib/format';
 
 export default function MemberSavingsPage() {
   const router = useRouter();
-  const [contributions, setContributions] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [memberId, setMemberId] = useState<string>('');
+  const [contributions, setContributions] = useState<Contribution[]>([]);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
     const user = localStorage.getItem('user');
-
-    if (!token) {
+    if (!token || !user) {
       router.push('/login');
       return;
     }
-
-    if (user) {
-      const userData = JSON.parse(user);
-      setMemberId(userData.id);
-      fetchContributions(userData.id);
-    }
+    const parsed = JSON.parse(user);
+    contributionService.getMember(parsed.id).then(setContributions);
   }, [router]);
 
-  const fetchContributions = async (id: string) => {
-    try {
-      const data = await contributionService.getMember(id);
-      setContributions(data);
-    } catch (err) {
-      console.error('Error fetching contributions:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const totalSavings = contributions
-    .filter((c) => c.status === 'PAID')
-    .reduce((sum, c) => sum + c.amount, 0);
-
-  const missedCount = contributions.filter((c) => c.status === 'MISSED').length;
-
-  if (loading) {
-    return (
-      <div>
-        <Navbar />
-        <div className="flex justify-center items-center min-h-screen">
-          <p>Loading...</p>
-        </div>
-      </div>
-    );
-  }
+  const totalSavings = contributions.filter((item) => item.status === 'PAID').reduce((sum, item) => sum + item.amount, 0);
 
   return (
-    <div>
-      <Navbar />
-      <div className="max-w-7xl mx-auto px-4 py-8">
-        <h1 className="text-3xl font-bold mb-8">💰 My Savings</h1>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-          <div className="bg-white rounded-lg shadow p-6">
-            <p className="text-gray-600 text-sm">Total Savings</p>
-            <p className="text-3xl font-bold text-green-600">
-              ₹{totalSavings.toLocaleString()}
-            </p>
-          </div>
-
-          <div className="bg-white rounded-lg shadow p-6">
-            <p className="text-gray-600 text-sm">Contributions Made</p>
-            <p className="text-3xl font-bold text-blue-600">
-              {contributions.filter((c) => c.status === 'PAID').length}
-            </p>
-          </div>
-
-          <div className="bg-white rounded-lg shadow p-6">
-            <p className="text-gray-600 text-sm">Missed Payments</p>
-            <p className="text-3xl font-bold text-red-600">{missedCount}</p>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Month/Year</th>
-                  <th>Amount</th>
-                  <th>Status</th>
-                  <th>Date</th>
+    <AppShell title="My Savings History" subtitle="A simple ledger showing monthly contributions, missed months, and your cumulative savings in the cooperative.">
+      <section className="grid gap-4 md:grid-cols-3">
+        <div className="panel"><p className="text-sm text-slate-500">Total Savings</p><p className="mt-3 text-3xl font-semibold text-emerald-700">{formatCurrency(totalSavings)}</p></div>
+        <div className="panel"><p className="text-sm text-slate-500">Paid Months</p><p className="mt-3 text-3xl font-semibold text-slate-900">{contributions.filter((item) => item.status === 'PAID').length}</p></div>
+        <div className="panel"><p className="text-sm text-slate-500">Missed Months</p><p className="mt-3 text-3xl font-semibold text-rose-700">{contributions.filter((item) => item.status === 'MISSED').length}</p></div>
+      </section>
+      <section className="panel mt-8">
+        <div className="overflow-x-auto">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Month</th>
+                <th>Amount</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {contributions.map((contribution) => (
+                <tr key={contribution.id}>
+                  <td>{contribution.month}/{contribution.year}</td>
+                  <td>{formatCurrency(contribution.amount)}</td>
+                  <td>
+                    <span className={`badge ${
+                      contribution.status === 'PAID'
+                        ? 'badge-success'
+                        : contribution.status === 'MISSED'
+                          ? 'badge-danger'
+                          : 'badge-warning'
+                    }`}>
+                      {contribution.status}
+                    </span>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {contributions.map((contribution) => (
-                  <tr key={contribution.id}>
-                    <td>
-                      {contribution.month}/{contribution.year}
-                    </td>
-                    <td>₹{contribution.amount}</td>
-                    <td>
-                      <span
-                        className={`badge ${
-                          contribution.status === 'PAID'
-                            ? 'badge-success'
-                            : contribution.status === 'MISSED'
-                              ? 'badge-danger'
-                              : 'badge-warning'
-                        }`}
-                      >
-                        {contribution.status}
-                      </span>
-                    </td>
-                    <td>{new Date(contribution.createdAt).toLocaleDateString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         </div>
-      </div>
-    </div>
+      </section>
+    </AppShell>
   );
 }

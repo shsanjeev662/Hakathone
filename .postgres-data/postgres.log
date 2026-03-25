@@ -1,0 +1,22 @@
+2026-03-25 08:05:05.010 +0545 [5] LOG:  starting PostgreSQL 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
+2026-03-25 08:05:05.010 +0545 [5] LOG:  could not create IPv4 socket for address "127.0.0.1": Operation not permitted
+2026-03-25 08:05:05.010 +0545 [5] WARNING:  could not create listen socket for "localhost"
+2026-03-25 08:05:05.035 +0545 [5] FATAL:  could not create any TCP/IP sockets
+2026-03-25 08:05:05.038 +0545 [5] LOG:  database system is shut down
+2026-03-25 08:05:17.237 +0545 [5] LOG:  starting PostgreSQL 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
+2026-03-25 08:05:17.442 +0545 [5] LOG:  could not bind Unix address "/home/sanjeev/Hakathone/.postgres-run/.s.PGSQL.5432": Operation not permitted
+2026-03-25 08:05:17.442 +0545 [5] WARNING:  could not create Unix-domain socket in directory "/home/sanjeev/Hakathone/.postgres-run"
+2026-03-25 08:05:17.442 +0545 [5] FATAL:  could not create any Unix-domain sockets
+2026-03-25 08:05:17.444 +0545 [5] LOG:  database system is shut down
+2026-03-25 08:05:39.497 +0545 [12716] LOG:  starting PostgreSQL 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
+2026-03-25 08:05:39.786 +0545 [12716] LOG:  listening on Unix socket "/tmp/.s.PGSQL.5432"
+2026-03-25 08:05:39.959 +0545 [12721] LOG:  database system was shut down at 2026-03-25 08:04:52 +0545
+2026-03-25 08:05:40.007 +0545 [12716] LOG:  database system is ready to accept connections
+2026-03-25 08:10:40.058 +0545 [12719] LOG:  checkpoint starting: time
+2026-03-25 08:12:20.565 +0545 [12719] LOG:  checkpoint complete: wrote 994 buffers (6.1%); 0 WAL file(s) added, 0 removed, 0 recycled; write=99.759 s, sync=0.416 s, total=100.508 s; sync files=337, longest=0.039 s, average=0.002 s; distance=4699 kB, estimate=4699 kB; lsn=0/198AB30, redo lsn=0/198A548
+2026-03-25 08:15:40.665 +0545 [12719] LOG:  checkpoint starting: time
+2026-03-25 08:15:42.130 +0545 [12719] LOG:  checkpoint complete: wrote 11 buffers (0.1%); 0 WAL file(s) added, 0 removed, 0 recycled; write=1.150 s, sync=0.053 s, total=1.466 s; sync files=9, longest=0.032 s, average=0.006 s; distance=2 kB, estimate=4229 kB; lsn=0/198AF70, redo lsn=0/198AF38
+2026-03-25 09:00:28.376 +0545 [12719] LOG:  checkpoint starting: time
+2026-03-25 09:00:30.609 +0545 [12719] LOG:  checkpoint complete: wrote 11 buffers (0.1%); 0 WAL file(s) added, 0 removed, 0 recycled; write=1.043 s, sync=0.850 s, total=2.233 s; sync files=9, longest=0.830 s, average=0.095 s; distance=3 kB, estimate=3807 kB; lsn=0/198BCE8, redo lsn=0/198BCB0
+2026-03-25 09:10:28.733 +0545 [12719] LOG:  checkpoint starting: time
+2026-03-25 09:10:32.249 +0545 [12719] LOG:  checkpoint complete: wrote 11 buffers (0.1%); 0 WAL file(s) added, 0 removed, 0 recycled; write=1.144 s, sync=1.580 s, total=3.516 s; sync files=9, longest=0.580 s, average=0.176 s; distance=3 kB, estimate=3426 kB; lsn=0/198C918, redo lsn=0/198C8E0

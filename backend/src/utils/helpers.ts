@@ -1,4 +1,3 @@
-import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import bcryptjs from "bcryptjs";
 
@@ -56,16 +55,11 @@ export const generateRepaymentSchedule = (
       status: "PENDING",
     });
 
-    remainingBalance -= emiAmount;
+    remainingBalance = Math.max(0, remainingBalance - emiAmount);
   }
 
   return schedule;
 };
 
-export const calculateRiskLevel = (
-  missedPayments: number
-): "LOW" | "MEDIUM" | "HIGH" => {
-  if (missedPayments === 0) return "LOW";
-  if (missedPayments <= 2) return "MEDIUM";
-  return "HIGH";
-};
+export const formatCurrency = (amount: number) =>
+  `NPR ${Math.round(amount).toLocaleString("en-US")}`;

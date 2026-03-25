@@ -2,171 +2,95 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Navbar from '@/components/Navbar';
+import AppShell from '@/components/AppShell';
+import StatCard from '@/components/StatCard';
+import TrustBadge from '@/components/TrustBadge';
 import { dashboardService } from '@/services';
 import type { MemberDashboard } from '@/types';
+import { formatCurrency, formatDate } from '@/lib/format';
 
-export default function MemberDashboard() {
+export default function MemberDashboardPage() {
   const router = useRouter();
   const [dashboard, setDashboard] = useState<MemberDashboard | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
+    if (!localStorage.getItem('token')) {
       router.push('/login');
       return;
     }
-
-    const fetchDashboard = async () => {
-      try {
-        const data = await dashboardService.getMemberDashboard();
-        setDashboard(data);
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchDashboard();
+    dashboardService.getMemberDashboard().then(setDashboard);
   }, [router]);
 
-  if (loading) {
-    return (
-      <div>
-        <Navbar />
-        <div className="flex justify-center items-center min-h-screen">
-          <p>Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error || !dashboard) {
-    return (
-      <div>
-        <Navbar />
-        <div className="flex justify-center items-center min-h-screen">
-          <p className="text-red-600">Error: {error}</p>
-        </div>
-      </div>
-    );
+  if (!dashboard) {
+    return <AppShell title="My Dashboard">Loading dashboard...</AppShell>;
   }
 
   return (
-    <div>
-      <Navbar />
-      <div className="max-w-7xl mx-auto px-4 py-8">
-        <h1 className="text-3xl font-bold mb-8">📊 My Dashboard</h1>
+    <AppShell
+      title={`Namaste, ${dashboard.member.name}`}
+      subtitle="See your savings journey, trust score, active loans, and upcoming dues in one clear member-friendly view."
+    >
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Trust Score" value={`${dashboard.trust.score}/100`} hint={`${dashboard.trust.contributionConsistency}% contribution consistency`} />
+        <StatCard label="Total Savings" value={formatCurrency(dashboard.savings.total)} tone="success" hint={`${dashboard.savings.paid} monthly contributions`} />
+        <StatCard label="Active Loans" value={String(dashboard.loans.active)} tone="warning" hint={formatCurrency(dashboard.loans.totalAmount)} />
+        <StatCard label="Outstanding Balance" value={formatCurrency(dashboard.loans.outstandingBalance)} tone="danger" hint={`${dashboard.dues.overdue.length} overdue instalments`} />
+      </section>
 
-        {/* Savings Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-          <div className="bg-white rounded-lg shadow p-6">
-            <p className="text-gray-600 text-sm">Total Savings</p>
-            <p className="text-3xl font-bold text-green-600">
-              ₹{dashboard.savings.total.toLocaleString()}
-            </p>
-            <p className="text-xs text-gray-500 mt-1">
-              {dashboard.savings.paid} paid contributions
-            </p>
+      <section className="mt-8 grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+        <div className="panel">
+          <h2 className="text-2xl text-slate-900">My Trust Profile</h2>
+          <div className="mt-4 flex items-center gap-3">
+            <TrustBadge score={dashboard.trust.score} riskLevel={dashboard.trust.riskLevel} />
           </div>
-
-          <div className="bg-white rounded-lg shadow p-6">
-            <p className="text-gray-600 text-sm">Active Loans</p>
-            <p className="text-3xl font-bold text-blue-600">{dashboard.loans.active}</p>
-            <p className="text-xs text-gray-500 mt-1">
-              ₹{dashboard.loans.totalAmount.toLocaleString()} total
-            </p>
-          </div>
-
-          <div className="bg-white rounded-lg shadow p-6">
-            <p className="text-gray-600 text-sm">Overdue Payments</p>
-            <p className="text-3xl font-bold text-red-600">
-              {dashboard.dues.overdue.length}
-            </p>
-            <p className="text-xs text-gray-500 mt-1">
-              ₹
-              {dashboard.dues.overdue
-                .reduce((sum, r) => sum + r.amount, 0)
-                .toLocaleString()}{' '}
-              total
-            </p>
-          </div>
+          <p className="mt-4 text-sm text-slate-600">
+            Your trust score increases when you contribute regularly and pay instalments on time. It falls when payments are missed or delayed.
+          </p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Upcoming Dues */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-semibold mb-4">📅 Upcoming Dues</h2>
-            {dashboard.dues.upcoming.length > 0 ? (
-              <div className="space-y-3">
-                {dashboard.dues.upcoming.map((due) => (
-                  <div key={due.id} className="flex justify-between items-center p-3 bg-gray-50 rounded">
-                    <div>
-                      <p className="font-medium">₹{due.amount.toFixed(2)}</p>
-                      <p className="text-sm text-gray-600">
-                        Due: {new Date(due.dueDate).toLocaleDateString()}
-                      </p>
-                    </div>
-                    <span className="badge badge-warning">PENDING</span>
-                  </div>
-                ))}
+        <div className="panel">
+          <h2 className="text-2xl text-slate-900">Upcoming Due Dates</h2>
+          <div className="mt-4 space-y-3">
+            {dashboard.dues.upcoming.length ? dashboard.dues.upcoming.map((due) => (
+              <div key={due.id} className="rounded-[1.4rem] bg-slate-50 p-4">
+                <p className="font-semibold text-slate-900">{formatCurrency(due.amount)}</p>
+                <p className="text-sm text-slate-600">Due {formatDate(due.dueDate)}</p>
               </div>
-            ) : (
-              <p className="text-gray-500">No upcoming dues</p>
-            )}
+            )) : <p className="text-sm text-slate-500">No upcoming dues right now.</p>}
           </div>
+        </div>
+      </section>
 
-          {/* Overdue */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-semibold mb-4">⚠️ Overdue Payments</h2>
-            {dashboard.dues.overdue.length > 0 ? (
-              <div className="space-y-3">
-                {dashboard.dues.overdue.map((overdue) => (
-                  <div key={overdue.id} className="flex justify-between items-center p-3 bg-red-50 rounded">
-                    <div>
-                      <p className="font-medium">₹{overdue.amount.toFixed(2)}</p>
-                      <p className="text-sm text-gray-600">
-                        Was due: {new Date(overdue.dueDate).toLocaleDateString()}
-                      </p>
-                    </div>
-                    <span className="badge badge-danger">OVERDUE</span>
-                  </div>
-                ))}
+      <section className="mt-8 grid gap-6 lg:grid-cols-2">
+        <div className="panel">
+          <h2 className="text-2xl text-slate-900">Alerts & Messages</h2>
+          <div className="mt-4 space-y-3">
+            {dashboard.notifications.length ? dashboard.notifications.map((notification) => (
+              <div key={notification.id} className={`rounded-[1.4rem] p-4 text-sm ${
+                notification.type === 'ALERT'
+                  ? 'bg-rose-50 text-rose-800'
+                  : notification.type === 'WARNING'
+                    ? 'bg-amber-50 text-amber-900'
+                    : 'bg-sky-50 text-sky-800'
+              }`}>
+                {notification.message}
               </div>
-            ) : (
-              <p className="text-gray-500">No overdue payments</p>
-            )}
+            )) : <p className="text-sm text-slate-500">No notifications available.</p>}
           </div>
         </div>
 
-        {/* Notifications */}
-        <div className="mt-8 bg-white rounded-lg shadow p-6">
-          <h2 className="text-xl font-semibold mb-4">🔔 Notifications</h2>
-          {dashboard.notifications.length > 0 ? (
-            <div className="space-y-2">
-              {dashboard.notifications.map((notif) => (
-                <div
-                  key={notif.id}
-                  className={`p-3 rounded ${
-                    notif.type === 'ALERT'
-                      ? 'bg-red-50 text-red-800'
-                      : notif.type === 'WARNING'
-                        ? 'bg-yellow-50 text-yellow-800'
-                        : 'bg-blue-50 text-blue-800'
-                  }`}
-                >
-                  {notif.message}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-gray-500">No notifications</p>
-          )}
+        <div className="panel">
+          <h2 className="text-2xl text-slate-900">Overdue Payments</h2>
+          <div className="mt-4 space-y-3">
+            {dashboard.dues.overdue.length ? dashboard.dues.overdue.map((overdue) => (
+              <div key={overdue.id} className="rounded-[1.4rem] bg-rose-50 p-4">
+                <p className="font-semibold text-rose-900">{formatCurrency(overdue.amount)}</p>
+                <p className="text-sm text-rose-700">Was due on {formatDate(overdue.dueDate)}</p>
+              </div>
+            )) : <p className="text-sm text-slate-500">You have no overdue payments.</p>}
+          </div>
         </div>
-      </div>
-    </div>
+      </section>
+    </AppShell>
   );
 }

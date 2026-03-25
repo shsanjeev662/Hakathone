@@ -10,7 +10,7 @@ import {
 const router = Router();
 
 router.post("/", authMiddleware, adminMiddleware, addContribution);
-router.get("/", authMiddleware, getAllContributions);
+router.get("/", authMiddleware, adminMiddleware, getAllContributions);
 router.get("/member/:memberId", authMiddleware, getMemberContributions);
 router.put("/:id/status", authMiddleware, adminMiddleware, updateContributionStatus);
 

@@ -1,32 +1,52 @@
 import { Response } from "express";
 import { AuthRequest } from "../middleware/auth";
 import { prisma } from "../index";
+import { computeMemberAnalytics } from "../utils/analytics";
+
+const canAccessMember = (req: AuthRequest, memberId: string) =>
+  req.user?.role === "ADMIN" || req.user?.id === memberId;
+
+const refreshTrustScore = async (memberId: string) => {
+  const [contributions, loans] = await Promise.all([
+    prisma.contribution.findMany({ where: { memberId } }),
+    prisma.loan.findMany({
+      where: { memberId },
+      include: { repayments: true },
+    }),
+  ]);
+
+  const analytics = computeMemberAnalytics({
+    contributions,
+    repayments: loans.flatMap((loan) => loan.repayments),
+  });
+
+  await prisma.memberProfile.upsert({
+    where: { userId: memberId },
+    create: { userId: memberId, trustScore: analytics.trustScore },
+    update: { trustScore: analytics.trustScore },
+  });
+
+  return analytics;
+};
 
 export const addContribution = async (req: AuthRequest, res: Response) => {
   try {
     const { memberId, amount, month, year, status = "PAID" } = req.body;
 
-    if (!memberId || !amount || month === undefined || year === undefined) {
+    if (!memberId || amount === undefined || month === undefined || year === undefined) {
       return res.status(400).json({
         error: "memberId, amount, month, and year are required",
       });
     }
 
-    // Check if contribution already exists for this month
     const existing = await prisma.contribution.findUnique({
       where: {
-        memberId_month_year: {
-          memberId,
-          month,
-          year,
-        },
+        memberId_month_year: { memberId, month, year },
       },
     });
 
     if (existing) {
-      return res.status(400).json({
-        error: "Contribution already exists for this month",
-      });
+      return res.status(400).json({ error: "Contribution already exists for this month" });
     }
 
     const contribution = await prisma.contribution.create({
@@ -37,36 +57,55 @@ export const addContribution = async (req: AuthRequest, res: Response) => {
         year,
         status,
       },
+      include: {
+        member: {
+          select: { name: true, email: true },
+        },
+      },
     });
 
-    // Create notification
-    if (status === "PAID") {
-      await prisma.notification.create({
-        data: {
-          userId: memberId,
-          message: `Contribution of ${amount} recorded for ${month}/${year}`,
-          type: "INFO",
-        },
-      });
-    }
+    const analytics = await refreshTrustScore(memberId);
 
-    res.status(201).json(contribution);
+    await prisma.notification.create({
+      data: {
+        userId: memberId,
+        message:
+          status === "PAID"
+            ? `Monthly contribution of NPR ${amount} recorded successfully.`
+            : `Contribution for ${month}/${year} is marked ${status.toLowerCase()}.`,
+        type: status === "PAID" ? "INFO" : "WARNING",
+      },
+    });
+
+    res.status(201).json({
+      ...contribution,
+      trustScore: analytics.trustScore,
+    });
   } catch (error) {
     console.error("Add contribution error:", error);
     res.status(500).json({ error: "Failed to add contribution" });
   }
 };
 
-export const getMemberContributions = async (
-  req: AuthRequest,
-  res: Response
-) => {
+export const getMemberContributions = async (req: AuthRequest, res: Response) => {
   try {
     const { memberId } = req.params;
 
+    if (!canAccessMember(req, memberId)) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
     const contributions = await prisma.contribution.findMany({
       where: { memberId },
-      orderBy: { createdAt: "desc" },
+      include: {
+        member: {
+          select: {
+            name: true,
+            email: true,
+          },
+        },
+      },
+      orderBy: [{ year: "desc" }, { month: "desc" }],
     });
 
     res.json(contributions);
@@ -76,16 +115,21 @@ export const getMemberContributions = async (
   }
 };
 
-export const getAllContributions = async (req: AuthRequest, res: Response) => {
+export const getAllContributions = async (_req: AuthRequest, res: Response) => {
   try {
     const contributions = await prisma.contribution.findMany({
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ year: "desc" }, { month: "desc" }],
       include: {
         member: {
           select: {
             id: true,
             name: true,
             email: true,
+            memberProfile: {
+              select: {
+                trustScore: true,
+              },
+            },
           },
         },
       },
@@ -98,10 +142,7 @@ export const getAllContributions = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const updateContributionStatus = async (
-  req: AuthRequest,
-  res: Response
-) => {
+export const updateContributionStatus = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -111,7 +152,12 @@ export const updateContributionStatus = async (
       data: { status },
     });
 
-    res.json(contribution);
+    const analytics = await refreshTrustScore(contribution.memberId);
+
+    res.json({
+      ...contribution,
+      trustScore: analytics.trustScore,
+    });
   } catch (error) {
     console.error("Update contribution status error:", error);
     res.status(500).json({ error: "Failed to update contribution" });

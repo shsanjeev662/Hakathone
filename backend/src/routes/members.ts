@@ -10,7 +10,7 @@ import {
 
 const router = Router();
 
-router.get("/", authMiddleware, getAllMembers);
+router.get("/", authMiddleware, adminMiddleware, getAllMembers);
 router.post("/", authMiddleware, adminMiddleware, addMember);
 router.put("/:id", authMiddleware, adminMiddleware, updateMember);
 router.delete("/:id", authMiddleware, adminMiddleware, deleteMember);

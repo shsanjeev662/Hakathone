@@ -1,64 +1,142 @@
 import { Response } from "express";
 import { AuthRequest } from "../middleware/auth";
 import { prisma } from "../index";
+import {
+  computeMemberAnalytics,
+  summarizeLoan,
+} from "../utils/analytics";
 import { calculateEMI } from "../utils/helpers";
+
+const buildSchedule = ({
+  amount,
+  annualRate,
+  months,
+  startDate,
+}: {
+  amount: number;
+  annualRate: number;
+  months: number;
+  startDate: Date;
+}) => {
+  const monthlyRate = annualRate / 100 / 12;
+  const emiAmount = calculateEMI(amount, annualRate, months);
+  let balance = amount;
+
+  return Array.from({ length: months }, (_, index) => {
+    const interestAmount = monthlyRate === 0 ? 0 : Math.round(balance * monthlyRate * 100) / 100;
+    const principalAmount =
+      index === months - 1
+        ? Math.round(balance * 100) / 100
+        : Math.round((emiAmount - interestAmount) * 100) / 100;
+
+    balance = Math.max(0, Math.round((balance - principalAmount) * 100) / 100);
+
+    const dueDate = new Date(startDate);
+    dueDate.setMonth(dueDate.getMonth() + index + 1);
+
+    return {
+      installmentNumber: index + 1,
+      amount: emiAmount,
+      principalAmount,
+      interestAmount,
+      dueDate,
+      status: "PENDING" as const,
+    };
+  });
+};
 
 export const issueLoan = async (req: AuthRequest, res: Response) => {
   try {
-    const { memberId, amount, interestRate, durationMonths } = req.body;
+    const { memberId, amount, interestRate, durationMonths, startDate } = req.body;
 
     if (!memberId || !amount || interestRate === undefined || !durationMonths) {
       return res.status(400).json({
-        error:
-          "memberId, amount, interestRate, and durationMonths are required",
+        error: "memberId, amount, interestRate, and durationMonths are required",
       });
     }
 
+    const member = await prisma.user.findUnique({
+      where: { id: memberId },
+      include: {
+        contributions: true,
+        loans: {
+          include: {
+            repayments: true,
+          },
+        },
+        memberProfile: true,
+      },
+    });
+
+    if (!member) {
+      return res.status(404).json({ error: "Member not found" });
+    }
+
+    const analytics = computeMemberAnalytics({
+      contributions: member.contributions,
+      repayments: member.loans.flatMap((loan) => loan.repayments),
+    });
+
+    const approvalWarnings = analytics.alerts.map((item) => item.message);
     const emiAmount = calculateEMI(amount, interestRate, durationMonths);
+    const loanStartDate = startDate ? new Date(startDate) : new Date();
 
-    const loan = await prisma.loan.create({
-      data: {
-        memberId,
-        amount,
-        interestRate,
-        durationMonths,
-        emiAmount,
-        startDate: new Date(),
-        status: "ACTIVE",
-      },
-    });
-
-    // Create repayment schedule
-    const repaymentSchedule = [];
-    for (let i = 1; i <= durationMonths; i++) {
-      const dueDate = new Date();
-      dueDate.setMonth(dueDate.getMonth() + i);
-
-      repaymentSchedule.push({
-        loanId: loan.id,
-        amount: emiAmount,
-        dueDate,
-        status: "PENDING",
+    const result = await prisma.$transaction(async (tx) => {
+      const loan = await tx.loan.create({
+        data: {
+          memberId,
+          amount,
+          interestRate,
+          durationMonths,
+          emiAmount,
+          startDate: loanStartDate,
+          status: "ACTIVE",
+          riskLevel: analytics.riskLevel,
+          riskScore: analytics.riskScore,
+        },
       });
-    }
 
-    await prisma.repayment.createMany({
-      data: repaymentSchedule,
-    });
+      await tx.repayment.createMany({
+        data: buildSchedule({
+          amount,
+          annualRate: interestRate,
+          months: durationMonths,
+          startDate: loanStartDate,
+        }).map((repayment) => ({
+          ...repayment,
+          loanId: loan.id,
+        })),
+      });
 
-    // Create notification
-    await prisma.notification.create({
-      data: {
-        userId: memberId,
-        message: `Loan approved: ₹${amount} with EMI of ₹${emiAmount.toFixed(2)}`,
-        type: "INFO",
-      },
+      await tx.notification.createMany({
+        data: [
+          {
+            userId: memberId,
+            message: `Loan approved for NPR ${amount}. First instalment is due next month.`,
+            type: analytics.riskLevel === "HIGH" ? "WARNING" : "INFO",
+          },
+          {
+            userId: req.user!.id,
+            message: `Loan issued to ${member.name} with ${analytics.riskLevel.toLowerCase()} risk profile.`,
+            type: analytics.riskLevel === "HIGH" ? "ALERT" : "INFO",
+          },
+        ],
+      });
+
+      return loan;
     });
 
     res.status(201).json({
-      loan,
+      loan: result,
       emiAmount,
       totalRepayments: durationMonths,
+      approvalInsights: {
+        trustScore: analytics.trustScore,
+        contributionConsistency: analytics.contributionConsistency,
+        riskLevel: analytics.riskLevel,
+        riskScore: analytics.riskScore,
+        warnings: approvalWarnings,
+      },
     });
   } catch (error) {
     console.error("Issue loan error:", error);
@@ -66,7 +144,7 @@ export const issueLoan = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const getAllLoans = async (req: AuthRequest, res: Response) => {
+export const getAllLoans = async (_req: AuthRequest, res: Response) => {
   try {
     const loans = await prisma.loan.findMany({
       orderBy: { createdAt: "desc" },
@@ -76,20 +154,24 @@ export const getAllLoans = async (req: AuthRequest, res: Response) => {
             id: true,
             name: true,
             email: true,
+            memberProfile: {
+              select: {
+                trustScore: true,
+              },
+            },
           },
         },
-        repayments: {
-          where: { status: "OVERDUE" },
-        },
+        repayments: true,
       },
     });
 
-    const loansWithStats = loans.map((loan) => ({
-      ...loan,
-      overdueCount: loan.repayments.length,
-    }));
-
-    res.json(loansWithStats);
+    res.json(
+      loans.map((loan) => ({
+        ...loan,
+        overdueCount: loan.repayments.filter((item) => item.status === "OVERDUE").length,
+        ...summarizeLoan(loan),
+      }))
+    );
   } catch (error) {
     console.error("Get all loans error:", error);
     res.status(500).json({ error: "Failed to fetch loans" });
@@ -100,15 +182,26 @@ export const getMemberLoans = async (req: AuthRequest, res: Response) => {
   try {
     const { memberId } = req.params;
 
+    if (req.user?.role !== "ADMIN" && req.user?.id !== memberId) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
     const loans = await prisma.loan.findMany({
       where: { memberId },
       include: {
-        repayments: true,
+        repayments: {
+          orderBy: { dueDate: "asc" },
+        },
       },
       orderBy: { createdAt: "desc" },
     });
 
-    res.json(loans);
+    res.json(
+      loans.map((loan) => ({
+        ...loan,
+        ...summarizeLoan(loan),
+      }))
+    );
   } catch (error) {
     console.error("Get member loans error:", error);
     res.status(500).json({ error: "Failed to fetch loans" });
@@ -127,6 +220,11 @@ export const getLoanDetails = async (req: AuthRequest, res: Response) => {
             id: true,
             name: true,
             email: true,
+            memberProfile: {
+              select: {
+                trustScore: true,
+              },
+            },
           },
         },
         repayments: {
@@ -139,13 +237,13 @@ export const getLoanDetails = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: "Loan not found" });
     }
 
-    const paidRepayments = loan.repayments.filter((r) => r.status === "PAID");
-    const totalRepaid = paidRepayments.reduce((sum, r) => sum + r.amount, 0);
+    if (req.user?.role !== "ADMIN" && req.user?.id !== loan.member.id) {
+      return res.status(403).json({ error: "Access denied" });
+    }
 
     res.json({
       ...loan,
-      totalRepaid,
-      remainingAmount: loan.amount - totalRepaid,
+      ...summarizeLoan(loan),
     });
   } catch (error) {
     console.error("Get loan details error:", error);
@@ -165,7 +263,7 @@ export const closeLoan = async (req: AuthRequest, res: Response) => {
     await prisma.notification.create({
       data: {
         userId: loan.memberId,
-        message: `Loan of ₹${loan.amount} has been closed`,
+        message: `Loan of NPR ${loan.amount} has been marked complete.`,
         type: "INFO",
       },
     });

@@ -28,12 +28,13 @@ export const register = async (req: Request, res: Response) => {
       },
     });
 
-    // Create member profile
-    await prisma.memberProfile.create({
-      data: {
-        userId: user.id,
-      },
-    });
+    if (role === "MEMBER") {
+      await prisma.memberProfile.create({
+        data: {
+          userId: user.id,
+        },
+      });
+    }
 
     const token = generateToken(user.id, user.email, user.role);
 

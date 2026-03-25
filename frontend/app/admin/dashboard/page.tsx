@@ -2,24 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Navbar from '@/components/Navbar';
-import { dashboardService } from '@/services';
+import AppShell from '@/components/AppShell';
+import StatCard from '@/components/StatCard';
+import TrustBadge from '@/components/TrustBadge';
+import { dashboardService, repaymentService } from '@/services';
 import type { DashboardStats } from '@/types';
-import {
-  BarChart,
-  Bar,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  PieChart,
-  Pie,
-  Cell,
-  ResponsiveContainer,
-} from 'recharts';
+import { formatCurrency, formatDate } from '@/lib/format';
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -27,223 +15,173 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const fetchStats = async () => {
+    try {
+      const data = await dashboardService.getStats();
+      setStats(data);
+    } catch (err: any) {
+      setError(err.response?.data?.error || err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
+    if (!localStorage.getItem('token')) {
       router.push('/login');
       return;
     }
-
-    const fetchStats = async () => {
-      try {
-        const data = await dashboardService.getStats();
-        setStats(data);
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchStats();
   }, [router]);
 
+  const refreshOverdue = async () => {
+    await repaymentService.checkOverdue();
+    await fetchStats();
+  };
+
   if (loading) {
-    return (
-      <div>
-        <Navbar />
-        <div className="flex justify-center items-center min-h-screen">
-          <p>Loading...</p>
-        </div>
-      </div>
-    );
+    return <AppShell title="Admin Dashboard">Loading dashboard...</AppShell>;
   }
 
   if (error || !stats) {
-    return (
-      <div>
-        <Navbar />
-        <div className="flex justify-center items-center min-h-screen">
-          <p className="text-red-600">Error: {error}</p>
-        </div>
-      </div>
-    );
+    return <AppShell title="Admin Dashboard">Error: {error}</AppShell>;
   }
 
-  const riskData = [
-    { name: 'Low Risk', value: stats.memberRisks.filter((m) => m.riskLevel === 'LOW').length },
-    { name: 'Medium Risk', value: stats.memberRisks.filter((m) => m.riskLevel === 'MEDIUM').length },
-    { name: 'High Risk', value: stats.memberRisks.filter((m) => m.riskLevel === 'HIGH').length },
-  ];
-
-  const COLORS = ['#10B981', '#F59E0B', '#EF4444'];
-
   return (
-    <div>
-      <Navbar />
-      <div className="max-w-7xl mx-auto px-4 py-8">
-        <h1 className="text-3xl font-bold mb-8">📊 Admin Dashboard</h1>
+    <AppShell
+      title="Community Finance Control Room"
+      subtitle="Track savings health, loan exposure, trust signals, and payment discipline from a single admin view designed for Dhukuti operations."
+      actions={
+        <>
+          <button className="btn btn-secondary" onClick={fetchStats}>Refresh</button>
+          <button className="btn btn-primary" onClick={refreshOverdue}>Mark Overdues</button>
+        </>
+      }
+    >
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <StatCard label="Total Members" value={String(stats.totalMembers)} hint="Active cooperative members" />
+        <StatCard label="Total Savings" value={formatCurrency(stats.totalSavings)} tone="success" hint={`${stats.collectionRate}% collection rate`} />
+        <StatCard label="Active Loans" value={String(stats.activeLoans)} tone="warning" hint={formatCurrency(stats.totalActiveLoanAmount)} />
+        <StatCard label="Overdue Payments" value={String(stats.overduePayments)} tone="danger" hint={formatCurrency(stats.totalOverdueAmount)} />
+        <StatCard label="Average Trust" value={`${stats.trustScoreAverage}/100`} hint={`${stats.repaymentRate}% repayment rate`} />
+      </section>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <div className="bg-white rounded-lg shadow p-6">
-            <p className="text-gray-600 text-sm">Total Members</p>
-            <p className="text-3xl font-bold text-blue-600">{stats.totalMembers}</p>
+      <section className="mt-8 grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+        <div className="panel">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-2xl text-slate-900">Savings Trend</h2>
+            <p className="text-sm text-slate-500">Last 6 months</p>
           </div>
-
-          <div className="bg-white rounded-lg shadow p-6">
-            <p className="text-gray-600 text-sm">Total Savings</p>
-            <p className="text-3xl font-bold text-green-600">
-              ₹{stats.totalSavings.toLocaleString()}
-            </p>
-          </div>
-
-          <div className="bg-white rounded-lg shadow p-6">
-            <p className="text-gray-600 text-sm">Active Loans</p>
-            <p className="text-3xl font-bold text-yellow-600">{stats.activeLoans}</p>
-            <p className="text-xs text-gray-500 mt-1">
-              ₹{stats.totalActiveLoanAmount.toLocaleString()}
-            </p>
-          </div>
-
-          <div className="bg-white rounded-lg shadow p-6">
-            <p className="text-gray-600 text-sm">Overdue Payments</p>
-            <p className="text-3xl font-bold text-red-600">{stats.overduePayments}</p>
-            <p className="text-xs text-gray-500 mt-1">
-              ₹{stats.totalOverdueAmount.toLocaleString()}
-            </p>
+          <div className="mt-8 flex h-80 items-end gap-4">
+            {stats.monthlySavings.map((item) => {
+              const max = Math.max(...stats.monthlySavings.map((entry) => entry.total), 1);
+              const height = `${Math.max(12, (item.total / max) * 100)}%`;
+              return (
+                <div key={item.label} className="flex flex-1 flex-col items-center gap-3">
+                  <div className="w-full rounded-t-[1.25rem] bg-gradient-to-t from-emerald-700 to-emerald-300" style={{ height }} />
+                  <div className="text-center text-xs text-slate-600">
+                    <p className="font-semibold">{item.label}</p>
+                    <p>{formatCurrency(item.total)}</p>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-          {/* Risk Distribution */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-semibold mb-4">Member Risk Distribution</h2>
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={riskData}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={({ name, value }) => `${name}: ${value}`}
-                  outerRadius={100}
-                  fill="#8884d8"
-                  dataKey="value"
-                >
-                  {COLORS.map((color, index) => (
-                    <Cell key={`cell-${index}`} fill={color} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
+        <div className="panel">
+          <h2 className="text-2xl text-slate-900">Loan Health Mix</h2>
+          <div className="mt-6 space-y-5">
+            {stats.loanStatusBreakdown.map((item, index) => {
+              const total = stats.loanStatusBreakdown.reduce((sum, entry) => sum + entry.value, 0) || 1;
+              const width = `${(item.value / total) * 100}%`;
+              const color = ['bg-emerald-600', 'bg-amber-500', 'bg-rose-500'][index] || 'bg-slate-500';
+              return (
+                <div key={item.name}>
+                  <div className="mb-2 flex items-center justify-between text-sm text-slate-600">
+                    <span>{item.name}</span>
+                    <span>{item.value}</span>
+                  </div>
+                  <div className="h-4 rounded-full bg-slate-100">
+                    <div className={`h-4 rounded-full ${color}`} style={{ width }} />
+                  </div>
+                </div>
+              );
+            })}
           </div>
+        </div>
+      </section>
 
-          {/* Overall Status */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-semibold mb-4">Overall Status</h2>
-            <div className="space-y-4">
-              <div>
-                <div className="flex justify-between mb-1">
-                  <span className="text-gray-700">Collection Rate</span>
-                  <span className="font-semibold">
-                    {stats.totalMembers > 0
-                      ? Math.round(
-                        ((stats.totalMembers - stats.missedContributions) /
-                          stats.totalMembers) *
-                        100
-                      )
-                      : 0}
-                    %
+      <section className="mt-8 grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+        <div className="panel">
+          <h2 className="text-2xl text-slate-900">Smart Alerts</h2>
+          <div className="mt-5 space-y-4">
+            {stats.smartAlerts.length ? stats.smartAlerts.map((alert) => (
+              <div key={`${alert.title}-${alert.message}`} className="rounded-[1.5rem] border border-slate-100 bg-slate-50 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="font-semibold text-slate-900">{alert.title}</p>
+                  <span className={`badge ${alert.type === 'ALERT' ? 'badge-danger' : alert.type === 'WARNING' ? 'badge-warning' : 'badge-info'}`}>
+                    {alert.type}
                   </span>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div
-                    className="bg-green-600 h-2 rounded-full"
-                    style={{
-                      width: `${
-                        stats.totalMembers > 0
-                          ? Math.round(
-                            ((stats.totalMembers -
-                              stats.missedContributions) /
-                              stats.totalMembers) *
-                            100
-                          )
-                          : 0
-                      }%`,
-                    }}
-                  ></div>
-                </div>
+                <p className="mt-2 text-sm text-slate-600">{alert.message}</p>
               </div>
-
-              <div>
-                <div className="flex justify-between mb-1">
-                  <span className="text-gray-700">Loan Repayment Rate</span>
-                  <span className="font-semibold">
-                    {stats.pendingRepayments > 0
-                      ? Math.round(
-                        ((stats.pendingRepayments - stats.overduePayments) /
-                          stats.pendingRepayments) *
-                        100
-                      )
-                      : 100}
-                    %
-                  </span>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div
-                    className="bg-blue-600 h-2 rounded-full"
-                    style={{
-                      width: `${
-                        stats.pendingRepayments > 0
-                          ? Math.round(
-                            ((stats.pendingRepayments -
-                              stats.overduePayments) /
-                              stats.pendingRepayments) *
-                            100
-                          )
-                          : 100
-                      }%`,
-                    }}
-                  ></div>
-                </div>
-              </div>
-            </div>
+            )) : <p className="text-sm text-slate-500">No urgent alerts right now.</p>}
           </div>
         </div>
 
-        {/* High Risk Members */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-xl font-semibold mb-4">High Risk Members</h2>
-          <div className="overflow-x-auto">
+        <div className="panel">
+          <h2 className="text-2xl text-slate-900">High-Risk Borrowers</h2>
+          <div className="mt-4 overflow-x-auto">
             <table className="table">
               <thead>
                 <tr>
                   <th>Member</th>
-                  <th>Email</th>
-                  <th>Risk Level</th>
-                  <th>Missed Payments</th>
+                  <th>Trust</th>
+                  <th>Risk</th>
+                  <th>Overdues</th>
+                  <th>Consistency</th>
                 </tr>
               </thead>
               <tbody>
-                {stats.memberRisks
-                  .filter((m) => m.riskLevel === 'HIGH')
-                  .map((member) => (
-                    <tr key={member.id}>
-                      <td>{member.name}</td>
-                      <td>{member.email}</td>
-                      <td>
-                        <span className="badge badge-danger">{member.riskLevel}</span>
-                      </td>
-                      <td>{member.missedPayments}</td>
-                    </tr>
-                  ))}
+                {stats.memberRisks.slice(0, 6).map((member) => (
+                  <tr key={member.id}>
+                    <td>
+                      <div>
+                        <p className="font-semibold text-slate-900">{member.name}</p>
+                        <p className="text-xs text-slate-500">{member.email}</p>
+                      </div>
+                    </td>
+                    <td><TrustBadge score={member.trustScore} riskLevel={member.riskLevel} /></td>
+                    <td>{member.riskScore}/100</td>
+                    <td>{member.missedPayments}</td>
+                    <td>{member.contributionConsistency}%</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
         </div>
-      </div>
-    </div>
+      </section>
+
+      <section className="mt-8 panel">
+        <h2 className="text-2xl text-slate-900">Recent Loan Exposure</h2>
+        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {stats.recentLoans.map((loan) => (
+            <div key={loan.id} className="rounded-[1.5rem] border border-slate-100 bg-slate-50 p-5">
+              <div className="flex items-center justify-between">
+                <p className="font-semibold text-slate-900">{formatCurrency(loan.amount)}</p>
+                <span className={`badge ${loan.riskLevel === 'HIGH' ? 'badge-danger' : loan.riskLevel === 'MEDIUM' ? 'badge-warning' : 'badge-success'}`}>
+                  {loan.riskLevel}
+                </span>
+              </div>
+              <p className="mt-2 text-sm text-slate-600">Outstanding: {formatCurrency(loan.outstandingBalance)}</p>
+              <p className="text-sm text-slate-600">Overdue: {formatCurrency(loan.overdueAmount)}</p>
+              <p className="text-sm text-slate-600">Next due: {formatDate(loan.nextDueDate)}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+    </AppShell>
   );
 }

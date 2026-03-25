@@ -11,7 +11,7 @@ import {
 const router = Router();
 
 router.post("/", authMiddleware, adminMiddleware, issueLoan);
-router.get("/", authMiddleware, getAllLoans);
+router.get("/", authMiddleware, adminMiddleware, getAllLoans);
 router.get("/member/:memberId", authMiddleware, getMemberLoans);
 router.get("/:id", authMiddleware, getLoanDetails);
 router.patch("/:id/close", authMiddleware, adminMiddleware, closeLoan);

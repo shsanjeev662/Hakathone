@@ -1,40 +1,46 @@
 import api from './api';
 import type {
-  User,
   Contribution,
-  Loan,
-  Repayment,
   DashboardStats,
+  Loan,
+  LoanSummaryReport,
   MemberDashboard,
+  MemberListItem,
+  MemberStatementReport,
+  MonthlyReport,
+  Repayment,
+  User,
 } from '@/types';
 
-// Auth
 export const authService = {
   login: async (email: string, password: string) => {
     const response = await api.post<User>('/auth/login', { email, password });
     return response.data;
   },
   register: async (name: string, email: string, password: string) => {
-    const response = await api.post<User>('/auth/register', {
-      name,
-      email,
-      password,
-    });
+    const response = await api.post<User>('/auth/register', { name, email, password });
     return response.data;
   },
 };
 
-// Members
 export const memberService = {
   getAll: async () => {
-    const response = await api.get('/members');
+    const response = await api.get<MemberListItem[]>('/members');
     return response.data;
   },
-  add: async (data: { name: string; email: string; password: string; phone?: string; address?: string }) => {
+  add: async (data: {
+    name: string;
+    email: string;
+    password: string;
+    phone?: string;
+    address?: string;
+    occupation?: string;
+    emergencyContact?: string;
+  }) => {
     const response = await api.post('/members', data);
     return response.data;
   },
-  update: async (id: string, data: any) => {
+  update: async (id: string, data: Record<string, unknown>) => {
     const response = await api.put(`/members/${id}`, data);
     return response.data;
   },
@@ -48,18 +54,23 @@ export const memberService = {
   },
 };
 
-// Contributions
 export const contributionService = {
   getAll: async () => {
-    const response = await api.get('/contributions');
+    const response = await api.get<Contribution[]>('/contributions');
     return response.data;
   },
-  add: async (data: { memberId: string; amount: number; month: number; year: number }) => {
+  add: async (data: {
+    memberId: string;
+    amount: number;
+    month: number;
+    year: number;
+    status?: 'PAID' | 'MISSED' | 'PENDING';
+  }) => {
     const response = await api.post('/contributions', data);
     return response.data;
   },
   getMember: async (memberId: string) => {
-    const response = await api.get(`/contributions/member/${memberId}`);
+    const response = await api.get<Contribution[]>(`/contributions/member/${memberId}`);
     return response.data;
   },
   updateStatus: async (id: string, status: string) => {
@@ -68,10 +79,9 @@ export const contributionService = {
   },
 };
 
-// Loans
 export const loanService = {
   getAll: async () => {
-    const response = await api.get('/loans');
+    const response = await api.get<Loan[]>('/loans');
     return response.data;
   },
   issue: async (data: {
@@ -79,16 +89,17 @@ export const loanService = {
     amount: number;
     interestRate: number;
     durationMonths: number;
+    startDate?: string;
   }) => {
     const response = await api.post('/loans', data);
     return response.data;
   },
   getMember: async (memberId: string) => {
-    const response = await api.get(`/loans/member/${memberId}`);
+    const response = await api.get<Loan[]>(`/loans/member/${memberId}`);
     return response.data;
   },
   getDetails: async (id: string) => {
-    const response = await api.get(`/loans/${id}`);
+    const response = await api.get<Loan>(`/loans/${id}`);
     return response.data;
   },
   close: async (id: string) => {
@@ -97,14 +108,13 @@ export const loanService = {
   },
 };
 
-// Repayments
 export const repaymentService = {
   getAll: async () => {
-    const response = await api.get('/repayments');
+    const response = await api.get<Repayment[]>('/repayments');
     return response.data;
   },
-  record: async (loanId: string, amount: number) => {
-    const response = await api.post('/repayments', { loanId, amount });
+  record: async (data: { loanId?: string; repaymentId?: string; amount: number; paidDate?: string }) => {
+    const response = await api.post('/repayments', data);
     return response.data;
   },
   getLoan: async (loanId: string) => {
@@ -117,7 +127,6 @@ export const repaymentService = {
   },
 };
 
-// Dashboard
 export const dashboardService = {
   getStats: async () => {
     const response = await api.get<DashboardStats>('/dashboard/stats');
@@ -125,6 +134,21 @@ export const dashboardService = {
   },
   getMemberDashboard: async () => {
     const response = await api.get<MemberDashboard>('/dashboard/member');
+    return response.data;
+  },
+};
+
+export const reportService = {
+  getMemberStatement: async (memberId: string) => {
+    const response = await api.get<MemberStatementReport>(`/reports/member/${memberId}`);
+    return response.data;
+  },
+  getMonthlyReport: async () => {
+    const response = await api.get<MonthlyReport>('/reports/monthly');
+    return response.data;
+  },
+  getLoanSummary: async () => {
+    const response = await api.get<LoanSummaryReport>('/reports/loans');
     return response.data;
   },
 };

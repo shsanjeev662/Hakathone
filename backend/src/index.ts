@@ -8,6 +8,7 @@ import contributionRoutes from "./routes/contributions";
 import loanRoutes from "./routes/loans";
 import repaymentRoutes from "./routes/repayments";
 import dashboardRoutes from "./routes/dashboard";
+import reportRoutes from "./routes/reports";
 
 dotenv.config();
 
@@ -25,6 +26,7 @@ app.use("/api/contributions", contributionRoutes);
 app.use("/api/loans", loanRoutes);
 app.use("/api/repayments", repaymentRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/reports", reportRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {

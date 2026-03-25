@@ -10,7 +10,7 @@ import {
 const router = Router();
 
 router.post("/", authMiddleware, adminMiddleware, recordRepayment);
-router.get("/", authMiddleware, getAllRepayments);
+router.get("/", authMiddleware, adminMiddleware, getAllRepayments);
 router.get("/:loanId", authMiddleware, getLoanRepayments);
 router.post("/check-overdue", authMiddleware, adminMiddleware, checkAndUpdateOverdue);
 
