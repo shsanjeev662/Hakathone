@@ -72,7 +72,9 @@ export const addContribution = async (req: AuthRequest, res: Response) => {
         message:
           status === "PAID"
             ? `Monthly contribution of NPR ${amount} recorded successfully.`
-            : `Contribution for ${month}/${year} is marked ${status.toLowerCase()}.`,
+            : status === "MISSED"
+              ? `Contribution for ${month}/${year} is marked overdue.`
+              : `Contribution for ${month}/${year} is marked ${status.toLowerCase()}.`,
         type: status === "PAID" ? "INFO" : "WARNING",
       },
     });

@@ -2,9 +2,34 @@ import { Response } from "express";
 import { AuthRequest } from "../middleware/auth";
 import { prisma } from "../index";
 import { computeMemberAnalytics, summarizeLoan } from "../utils/analytics";
+import {
+  calculateOverdueContributions,
+  getOverdueMonthsCount,
+  isContributionPastDue,
+} from "../utils/helpers";
 
-export const getDashboardStats = async (_req: AuthRequest, res: Response) => {
+export const getDashboardStats = async (req: AuthRequest, res: Response) => {
   try {
+    const now = new Date();
+    const currentMonth = now.getMonth() + 1;
+    const currentYear = now.getFullYear();
+
+    await prisma.contribution.updateMany({
+      where: {
+        status: "PENDING",
+        OR: [
+          { year: { lt: currentYear } },
+          {
+            year: currentYear,
+            month: { lt: currentMonth },
+          },
+        ],
+      },
+      data: {
+        status: "MISSED",
+      },
+    });
+
     const members = await prisma.user.findMany({
       where: { role: "MEMBER" },
       include: {
@@ -20,18 +45,46 @@ export const getDashboardStats = async (_req: AuthRequest, res: Response) => {
 
     const activeLoans = members.flatMap((member) => member.loans.filter((loan) => loan.status === "ACTIVE"));
     const allRepayments = activeLoans.flatMap((loan) => loan.repayments);
-    const overdueRepayments = allRepayments.filter((item) => item.status === "OVERDUE");
+    const overdueRepaymentTransactions = allRepayments.filter((item) => item.status === "OVERDUE");
     const pendingRepayments = allRepayments.filter((item) => item.status === "PENDING");
     const contributions = members.flatMap((member) => member.contributions);
     const paidContributions = contributions.filter((item) => item.status === "PAID");
-    const missedContributions = contributions.filter((item) => item.status === "MISSED");
+    const overdueContributionTransactions = contributions.filter(
+      (item) => isContributionPastDue(item.month, item.year, now) && item.status !== "PAID"
+    );
 
+    const totalOverdueContributionAmount = calculateOverdueContributions(
+      contributions.map((c) => ({
+        month: c.month,
+        year: c.year,
+        amount: c.amount,
+        status: c.status,
+      }))
+    );
+    const overdueContributionCount = getOverdueMonthsCount(
+      contributions.map((c) => ({
+        month: c.month,
+        year: c.year,
+        status: c.status,
+      }))
+    );
+
+    const totalRepaymentOverdueAmount = overdueRepaymentTransactions.reduce((sum, item) => sum + item.amount, 0);
+    const totalOverduePaymentsAmount = totalRepaymentOverdueAmount + totalOverdueContributionAmount;
+    const missedContributions = contributions.filter((item) => item.status === "MISSED");
     const memberRisks = members
       .map((member) => {
         const analytics = computeMemberAnalytics({
           contributions: member.contributions,
           repayments: member.loans.flatMap((loan) => loan.repayments),
         });
+        const memberOverdueContributionCount = getOverdueMonthsCount(
+          member.contributions.map((c) => ({
+            month: c.month,
+            year: c.year,
+            status: c.status,
+          }))
+        );
 
         return {
           id: member.id,
@@ -40,7 +93,7 @@ export const getDashboardStats = async (_req: AuthRequest, res: Response) => {
           trustScore: analytics.trustScore,
           riskLevel: analytics.riskLevel,
           riskScore: analytics.riskScore,
-          missedPayments: analytics.overdueCount,
+          missedPayments: analytics.overdueCount + memberOverdueContributionCount,
           contributionConsistency: analytics.contributionConsistency,
         };
       })
@@ -61,13 +114,23 @@ export const getDashboardStats = async (_req: AuthRequest, res: Response) => {
       };
     });
 
+    const adminNotifications = await prisma.notification.findMany({
+      where: { userId: req.user!.id },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+    });
+
     res.json({
       totalMembers: members.length,
       totalSavings: paidContributions.reduce((sum, item) => sum + item.amount, 0),
       activeLoans: activeLoans.length,
       totalActiveLoanAmount: activeLoans.reduce((sum, item) => sum + item.amount, 0),
-      overduePayments: overdueRepayments.length,
-      totalOverdueAmount: overdueRepayments.reduce((sum, item) => sum + item.amount, 0),
+      overduePayments: overdueRepaymentTransactions.length + overdueContributionTransactions.length,
+      totalOverdueAmount: Math.round(totalOverduePaymentsAmount * 100) / 100,
+      totalRepaymentOverdueAmount: Math.round(totalRepaymentOverdueAmount * 100) / 100,
+      totalContributionOverdueAmount: Math.round(totalOverdueContributionAmount * 100) / 100,
+      overdueRepayments: overdueRepaymentTransactions.length,
+      overdueContributions: overdueContributionTransactions.length,
       missedContributions: missedContributions.length,
       pendingRepayments: pendingRepayments.length,
       collectionRate: contributions.length
@@ -82,15 +145,43 @@ export const getDashboardStats = async (_req: AuthRequest, res: Response) => {
         ? Math.round(memberRisks.reduce((sum, member) => sum + member.trustScore, 0) / members.length)
         : 0,
       smartAlerts: [
+        ...adminNotifications.map((notification) => ({
+          type: notification.type,
+          title: notification.type === "WARNING" ? "Member Reset Request" : "Admin Notification",
+          message: notification.message,
+        })),
         ...memberRisks
           .filter((member) => member.riskLevel === "HIGH")
           .slice(0, 3)
           .map((member) => ({
             type: "ALERT",
             title: `High-risk borrower: ${member.name}`,
-            message: `Trust score ${member.trustScore} with ${member.missedPayments} overdue instalment(s).`,
+            message: `Trust score ${member.trustScore} with ${member.missedPayments} overdue item(s).`,
           })),
-        ...pendingRepayments.slice(0, 3).map((repayment) => ({
+        ...(overdueContributionCount > 0
+          ? [
+              {
+                type: "ALERT",
+                title: "Overdue Monthly Deposits",
+                message: `${overdueContributionCount} member(s) have overdue monthly deposits totaling NPR ${Math.round(totalOverdueContributionAmount)}.`,
+              },
+            ]
+          : []),
+        ...(overdueRepaymentTransactions.length > 0
+          ? [
+              {
+                type: "ALERT",
+                title: "Overdue Repayments",
+                message: `${overdueRepaymentTransactions.length} repayment transaction(s) are overdue totaling NPR ${Math.round(totalRepaymentOverdueAmount)}.`,
+              },
+            ]
+          : []),
+        ...missedContributions.slice(0, 2).map((contribution) => ({
+          type: "ALERT",
+          title: "Marked Missed Contribution",
+          message: `Monthly deposit of NPR ${contribution.amount} for ${contribution.month}/${contribution.year} is marked as missed.`,
+        })),
+        ...pendingRepayments.slice(0, 2).map((repayment) => ({
           type: "WARNING",
           title: "Upcoming due date",
           message: `Instalment of NPR ${repayment.amount} is due on ${repayment.dueDate.toLocaleDateString()}.`,
@@ -101,7 +192,7 @@ export const getDashboardStats = async (_req: AuthRequest, res: Response) => {
       loanStatusBreakdown: [
         { name: "Active", value: activeLoans.length },
         { name: "Completed", value: members.flatMap((member) => member.loans).filter((loan) => loan.status === "COMPLETED").length },
-        { name: "Overdue Instalments", value: overdueRepayments.length },
+        { name: "Overdue Instalments", value: overdueRepaymentTransactions.length },
       ],
       recentLoans: activeLoans.slice(0, 5).map((loan) => ({
         id: loan.id,

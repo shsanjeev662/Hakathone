@@ -1,0 +1,4 @@
+.postgres-data/
+.postgres-run/
+frontend/tsconfig.tsbuildinfo
+backend/tsconfig.tsbuildinfo

@@ -1,4 +1,4 @@
-import api from './api';
+import api, { publicApi } from './api';
 import type {
   Contribution,
   DashboardStats,
@@ -14,11 +14,15 @@ import type {
 
 export const authService = {
   login: async (email: string, password: string) => {
-    const response = await api.post<User>('/auth/login', { email, password });
+    const response = await publicApi.post<User>('/auth/login', { email, password });
+    return response.data;
+  },
+  forgotPassword: async (email: string) => {
+    const response = await publicApi.post<{ message: string }>('/auth/forgot-password', { email });
     return response.data;
   },
   register: async (name: string, email: string, password: string) => {
-    const response = await api.post<User>('/auth/register', { name, email, password });
+    const response = await publicApi.post<User>('/auth/register', { name, email, password });
     return response.data;
   },
 };
@@ -42,6 +46,10 @@ export const memberService = {
   },
   update: async (id: string, data: Record<string, unknown>) => {
     const response = await api.put(`/members/${id}`, data);
+    return response.data;
+  },
+  resetPassword: async (id: string, password: string) => {
+    const response = await api.post(`/members/${id}/reset-password`, { password });
     return response.data;
   },
   delete: async (id: string) => {

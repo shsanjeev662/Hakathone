@@ -14,10 +14,13 @@ export interface MemberListItem {
   name: string;
   email: string;
   createdAt: string;
+  failedLoginAttempts: number;
+  isLocked: boolean;
   memberProfile?: {
     phone?: string;
     address?: string;
     occupation?: string;
+    emergencyContact?: string;
     trustScore: number;
   };
   totals: {
@@ -131,6 +134,10 @@ export interface DashboardStats {
   totalActiveLoanAmount: number;
   overduePayments: number;
   totalOverdueAmount: number;
+  totalRepaymentOverdueAmount: number;
+  totalContributionOverdueAmount: number;
+  overdueRepayments: number;
+  overdueContributions: number;
   missedContributions: number;
   pendingRepayments: number;
   collectionRate: number;

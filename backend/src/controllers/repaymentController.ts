@@ -2,6 +2,7 @@ import { Response } from "express";
 import { AuthRequest } from "../middleware/auth";
 import { prisma } from "../index";
 import { computeMemberAnalytics, isRepaymentLate } from "../utils/analytics";
+import { sendRepaymentAlertEmail } from "../utils/mailer";
 
 const refreshTrustScore = async (memberId: string) => {
   const [contributions, loans] = await Promise.all([
@@ -162,6 +163,7 @@ export const getLoanRepayments = async (req: AuthRequest, res: Response) => {
 export const checkAndUpdateOverdue = async (_req: AuthRequest, res: Response) => {
   try {
     const now = new Date();
+    let emailedOverdueCount = 0;
 
     const overdueRepayments = await prisma.repayment.findMany({
       where: {
@@ -172,7 +174,7 @@ export const checkAndUpdateOverdue = async (_req: AuthRequest, res: Response) =>
         loan: {
           include: {
             member: {
-              select: { id: true, name: true },
+              select: { id: true, name: true, email: true },
             },
           },
         },
@@ -195,12 +197,28 @@ export const checkAndUpdateOverdue = async (_req: AuthRequest, res: Response) =>
         ],
       });
 
+      const emailResult = await sendRepaymentAlertEmail({
+        to: repayment.loan.member.email,
+        memberName: repayment.loan.member.name,
+        amount: repayment.amount,
+        installmentNumber: repayment.installmentNumber,
+        dueDate: repayment.dueDate,
+        status: "OVERDUE",
+      });
+      if (emailResult.sent) {
+        emailedOverdueCount += 1;
+      }
+
       await refreshTrustScore(repayment.loan.member.id);
     }
 
     res.json({
-      message: `Updated ${overdueRepayments.length} repayments to overdue`,
+      message:
+        overdueRepayments.length > 0
+          ? `Updated ${overdueRepayments.length} repayments to overdue and sent ${emailedOverdueCount} EMI alert email(s)`
+          : "No overdue repayments were found",
       count: overdueRepayments.length,
+      emailedCount: emailedOverdueCount,
     });
   } catch (error) {
     console.error("Check overdue error:", error);

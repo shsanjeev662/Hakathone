@@ -1,6 +1,5 @@
+import "dotenv/config";
 import express from "express";
-import cors from "cors";
-import dotenv from "dotenv";
 import { PrismaClient } from "@prisma/client";
 import authRoutes from "./routes/auth";
 import memberRoutes from "./routes/members";
@@ -9,15 +8,39 @@ import loanRoutes from "./routes/loans";
 import repaymentRoutes from "./routes/repayments";
 import dashboardRoutes from "./routes/dashboard";
 import reportRoutes from "./routes/reports";
-
-dotenv.config();
+import { corsMiddleware } from "./middleware/cors";
+import { createRateLimiter } from "./middleware/rateLimit";
+import { authMiddleware, AuthRequest } from "./middleware/auth";
+import { securityConfig } from "./config/security";
 
 const app = express();
 const prisma = new PrismaClient();
 
+if (securityConfig.rateLimit.trustProxy) {
+  app.set("trust proxy", 1);
+}
+
 // Middleware
-app.use(cors());
+app.use(corsMiddleware);
 app.use(express.json());
+app.use(
+  "/api",
+  createRateLimiter({
+    windowMs: securityConfig.rateLimit.windowMs,
+    maxRequests: securityConfig.rateLimit.maxRequests,
+    keyPrefix: "ip",
+  })
+);
+app.use(
+  ["/api/members", "/api/contributions", "/api/loans", "/api/repayments", "/api/dashboard", "/api/reports"],
+  authMiddleware,
+  createRateLimiter({
+    windowMs: securityConfig.rateLimit.userWindowMs,
+    maxRequests: securityConfig.rateLimit.userMaxRequests,
+    keyPrefix: "user",
+    keyGenerator: (req) => (req as AuthRequest).user?.id ?? null,
+  })
+);
 
 // Routes
 app.use("/api/auth", authRoutes);
@@ -42,6 +65,9 @@ app.use(
     next: express.NextFunction
   ) => {
     console.error(err);
+    if (err.message.startsWith("CORS blocked")) {
+      return res.status(403).json({ error: "Origin is not allowed by CORS policy" });
+    }
     res.status(500).json({ error: "Internal server error" });
   }
 );

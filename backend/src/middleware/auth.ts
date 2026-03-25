@@ -1,11 +1,13 @@
 import jwt from "jsonwebtoken";
 import { Request, Response, NextFunction } from "express";
+import { UserRole } from "@prisma/client";
+import { securityConfig } from "../config/security";
 
 export interface AuthRequest extends Request {
   user?: {
     id: string;
     email: string;
-    role: string;
+    role: UserRole;
   };
 }
 
@@ -15,21 +17,23 @@ export const authMiddleware = (
   next: NextFunction
 ) => {
   try {
-    const token = req.headers.authorization?.split(" ")[1];
-
-    if (!token) {
-      return res.status(401).json({ error: "No token provided" });
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Authentication token is required" });
     }
+
+    const token = authHeader.slice("Bearer ".length).trim();
 
     const decoded = jwt.verify(
       token,
-      process.env.JWT_SECRET || "your_jwt_secret_key_here"
-    ) as { id: string; email: string; role: string };
+      securityConfig.jwtSecret,
+      { algorithms: ["HS256"] }
+    ) as { id: string; email: string; role: UserRole };
 
     req.user = decoded;
     next();
   } catch (error) {
-    return res.status(401).json({ error: "Invalid token" });
+    return res.status(401).json({ error: "Invalid or expired token" });
   }
 };
 
@@ -42,4 +46,18 @@ export const adminMiddleware = (
     return res.status(403).json({ error: "Admin access required" });
   }
   next();
+};
+
+export const requireRole = (...roles: UserRole[]) => {
+  return (req: AuthRequest, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+
+    next();
+  };
 };

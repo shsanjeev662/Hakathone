@@ -3,6 +3,8 @@ import { Response } from "express";
 import { AuthRequest } from "../middleware/auth";
 import { prisma } from "../index";
 import { computeMemberAnalytics } from "../utils/analytics";
+import { hashPassword } from "../utils/helpers";
+import { sendPasswordResetEmail } from "../utils/mailer";
 
 const baseMemberInclude = {
   memberProfile: true,
@@ -34,10 +36,13 @@ export const getAllMembers = async (_req: AuthRequest, res: Response) => {
           name: member.name,
           email: member.email,
           createdAt: member.createdAt,
+          failedLoginAttempts: member.failedLoginAttempts,
+          isLocked: member.isLocked,
           memberProfile: {
             phone: member.memberProfile?.phone,
             address: member.memberProfile?.address,
             occupation: member.memberProfile?.occupation,
+            emergencyContact: member.memberProfile?.emergencyContact,
             trustScore: analytics.trustScore,
           },
           totals: {
@@ -137,6 +142,61 @@ export const updateMember = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error("Update member error:", error);
     res.status(500).json({ error: "Failed to update member" });
+  }
+};
+
+export const resetMemberPassword = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { password } = req.body;
+
+    if (!password || String(password).trim().length < 6) {
+      return res.status(400).json({ error: "A new password of at least 6 characters is required" });
+    }
+
+    const member = await prisma.user.findUnique({
+      where: { id },
+      select: { id: true, role: true, name: true, email: true },
+    });
+
+    if (!member || member.role !== "MEMBER") {
+      return res.status(404).json({ error: "Member not found" });
+    }
+
+    const hashedPassword = await hashPassword(password);
+
+    await prisma.user.update({
+      where: { id },
+      data: {
+        password: hashedPassword,
+        failedLoginAttempts: 0,
+        isLocked: false,
+        lockedAt: null,
+      },
+    });
+
+    await prisma.notification.create({
+      data: {
+        userId: id,
+        type: "INFO",
+        message: "Your password was reset by the admin. Please use the new password shared with you.",
+      },
+    });
+
+    const emailResult = await sendPasswordResetEmail({
+      to: member.email,
+      memberName: member.name,
+      password,
+    });
+
+    res.json({
+      message: emailResult.sent
+        ? `Password reset successfully for ${member.name}. The account has been unlocked and the new password was sent by email.`
+        : `Password reset successfully for ${member.name}. The account has been unlocked, but email delivery is not configured.`,
+    });
+  } catch (error) {
+    console.error("Reset member password error:", error);
+    res.status(500).json({ error: "Failed to reset member password" });
   }
 };
 

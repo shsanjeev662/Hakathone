@@ -6,6 +6,7 @@ import {
   Repayment,
   RepaymentStatus,
 } from "@prisma/client";
+import { calculateOverdueContributions, getOverdueMonthsCount } from "./helpers";
 
 export type TrustRiskLevel = "LOW" | "MEDIUM" | "HIGH";
 
@@ -14,6 +15,8 @@ export interface MemberAnalytics {
   riskLevel: TrustRiskLevel;
   riskScore: number;
   contributionConsistency: number;
+  overdueContributionAmount: number;
+  overdueContributionCount: number;
   overdueCount: number;
   onTimeRepaymentCount: number;
   delayedRepaymentCount: number;
@@ -47,6 +50,23 @@ export const computeMemberAnalytics = ({
   const delayedRepayments = paidRepayments.filter(isRepaymentLate);
   const onTimeRepayments = paidRepayments.length - delayedRepayments.length;
 
+  // Calculate overdue contributions
+  const overdueContributionAmount = calculateOverdueContributions(
+    contributions.map((c) => ({
+      month: c.month,
+      year: c.year,
+      amount: c.amount,
+      status: c.status,
+    }))
+  );
+  const overdueContributionCount = getOverdueMonthsCount(
+    contributions.map((c) => ({
+      month: c.month,
+      year: c.year,
+      status: c.status,
+    }))
+  );
+
   const contributionConsistency = contributions.length
     ? Math.round((paidContributions.length / contributions.length) * 100)
     : 100;
@@ -58,7 +78,8 @@ export const computeMemberAnalytics = ({
     missedContributions.length * 10 -
     overdueRepayments.length * 12 -
     delayedRepayments.length * 5 -
-    pendingContributions.length * 2;
+    pendingContributions.length * 2 -
+    overdueContributionCount * 5;
 
   const trustScore = clamp(Math.round(scoreRaw), 0, 100);
 
@@ -67,6 +88,7 @@ export const computeMemberAnalytics = ({
       overdueRepayments.length * 22 +
         delayedRepayments.length * 10 +
         missedContributions.length * 12 +
+        overdueContributionCount * 8 +
         (100 - contributionConsistency) * 0.35
     ),
     0,
@@ -87,6 +109,12 @@ export const computeMemberAnalytics = ({
       message: `${overdueRepayments.length} instalment(s) are overdue and need action.`,
     });
   }
+  if (overdueContributionCount > 0) {
+    alerts.push({
+      type: "ALERT",
+      message: `${overdueContributionCount} monthly deposit(s) totaling NPR ${Math.round(overdueContributionAmount)} are overdue.`,
+    });
+  }
   if (riskLevel === "HIGH") {
     alerts.push({
       type: "WARNING",
@@ -105,6 +133,8 @@ export const computeMemberAnalytics = ({
     riskLevel,
     riskScore,
     contributionConsistency,
+    overdueContributionAmount: Math.round(overdueContributionAmount * 100) / 100,
+    overdueContributionCount,
     overdueCount: overdueRepayments.length,
     onTimeRepaymentCount: onTimeRepayments,
     delayedRepaymentCount: delayedRepayments.length,

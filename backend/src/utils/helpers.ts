@@ -1,11 +1,13 @@
 import jwt from "jsonwebtoken";
 import bcryptjs from "bcryptjs";
+import { UserRole } from "@prisma/client";
+import { securityConfig } from "../config/security";
 
-export const generateToken = (id: string, email: string, role: string) => {
+export const generateToken = (id: string, email: string, role: UserRole) => {
   return jwt.sign(
     { id, email, role },
-    process.env.JWT_SECRET || "your_jwt_secret_key_here",
-    { expiresIn: "7d" }
+    securityConfig.jwtSecret,
+    { expiresIn: "7d", algorithm: "HS256" }
   );
 };
 
@@ -63,3 +65,43 @@ export const generateRepaymentSchedule = (
 
 export const formatCurrency = (amount: number) =>
   `NPR ${Math.round(amount).toLocaleString("en-US")}`;
+
+export const isContributionPastDue = (
+  month: number,
+  year: number,
+  referenceDate = new Date()
+) => {
+  const currentMonth = referenceDate.getMonth() + 1;
+  const currentYear = referenceDate.getFullYear();
+
+  return year < currentYear || (year === currentYear && month < currentMonth);
+};
+
+export const calculateOverdueContributions = (
+  contributions: Array<{
+    month: number;
+    year: number;
+    amount: number;
+    status: string;
+  }>
+): number => {
+  return contributions
+    .filter((contribution) => {
+      const isNotPaid = contribution.status !== "PAID";
+      return isContributionPastDue(contribution.month, contribution.year) && isNotPaid;
+    })
+    .reduce((sum, item) => sum + item.amount, 0);
+};
+
+export const getOverdueMonthsCount = (
+  contributions: Array<{
+    month: number;
+    year: number;
+    status: string;
+  }>
+): number => {
+  return contributions.filter((contribution) => {
+    const isNotPaid = contribution.status !== "PAID";
+    return isContributionPastDue(contribution.month, contribution.year) && isNotPaid;
+  }).length;
+};

@@ -1,19 +1,26 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import AppShell from '@/components/AppShell';
+import FeedbackBanner from '@/components/FeedbackBanner';
+import StatCard from '@/components/StatCard';
 import TrustBadge from '@/components/TrustBadge';
 import { loanService, memberService } from '@/services';
 import type { Loan, MemberListItem } from '@/types';
 import { formatCurrency, formatDate } from '@/lib/format';
 
-export default function LoansPage() {
+function LoansPage() {
   const router = useRouter();
   const [loans, setLoans] = useState<Loan[]>([]);
   const [members, setMembers] = useState<MemberListItem[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [decision, setDecision] = useState<{ riskLevel: string; warnings: string[]; trustScore: number } | null>(null);
+  const [riskFilter, setRiskFilter] = useState<'ALL' | 'LOW' | 'MEDIUM' | 'HIGH'>('ALL');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     memberId: '',
     amount: '50000',
@@ -23,9 +30,16 @@ export default function LoansPage() {
   });
 
   const fetchData = async () => {
-    const [loanData, memberData] = await Promise.all([loanService.getAll(), memberService.getAll()]);
-    setLoans(loanData);
-    setMembers(memberData);
+    try {
+      const [loanData, memberData] = await Promise.all([loanService.getAll(), memberService.getAll()]);
+      setLoans(loanData);
+      setMembers(memberData);
+      setError(null);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to load loan data');
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -43,36 +57,69 @@ export default function LoansPage() {
 
   const handleIssueLoan = async (event: React.FormEvent) => {
     event.preventDefault();
-    const result = await loanService.issue({
-      memberId: formData.memberId,
-      amount: Number(formData.amount),
-      interestRate: Number(formData.interestRate),
-      durationMonths: Number(formData.durationMonths),
-      startDate: formData.startDate,
-    });
-    setDecision(result.approvalInsights);
-    setShowForm(false);
-    await fetchData();
+    try {
+      const result = await loanService.issue({
+        memberId: formData.memberId,
+        amount: Number(formData.amount),
+        interestRate: Number(formData.interestRate),
+        durationMonths: Number(formData.durationMonths),
+        startDate: formData.startDate,
+      });
+      setDecision(result.approvalInsights);
+      setSuccess('Loan issued and repayment schedule generated.');
+      setError(null);
+      setShowForm(false);
+      await fetchData();
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to issue loan');
+      setSuccess(null);
+    }
   };
+
+  const filteredLoans = loans.filter((loan) => riskFilter === 'ALL' || loan.riskLevel === riskFilter);
 
   return (
     <AppShell
       title="Loan Decision Desk"
-      subtitle="Issue loans with an auto-generated repayment plan, see simulated AI-based borrower risk before approval, and track outstanding balance after disbursement."
+      subtitle="Issue loans with repayment schedules, simulate borrower risk, and use approval insight to reduce disputes and bad debt."
       actions={<button className="btn btn-primary" onClick={() => setShowForm((value) => !value)}>{showForm ? 'Close Form' : 'Issue Loan'}</button>}
     >
+      <section className="grid gap-4 md:grid-cols-3">
+        <StatCard label="Active Loans" value={String(loans.filter((loan) => loan.status === 'ACTIVE').length)} hint="Current loan exposure" />
+        <StatCard label="High-Risk Loans" value={String(loans.filter((loan) => loan.riskLevel === 'HIGH').length)} tone="danger" hint="Need closer review" />
+        <StatCard label="Outstanding Balance" value={formatCurrency(loans.reduce((sum, loan) => sum + (loan.outstandingBalance || 0), 0))} tone="warning" hint="Total portfolio balance" />
+      </section>
+
+      {error ? <div className="mt-6"><FeedbackBanner message={error} tone="danger" /></div> : null}
+      {success ? <div className="mt-6"><FeedbackBanner message={success} tone="success" /></div> : null}
+
       {showForm ? (
         <form onSubmit={handleIssueLoan} className="panel grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          <select value={formData.memberId} onChange={(e) => setFormData({ ...formData, memberId: e.target.value })} required>
-            <option value="">Select member</option>
-            {members.map((member) => (
-              <option key={member.id} value={member.id}>{member.name}</option>
-            ))}
-          </select>
-          <input type="number" value={formData.amount} onChange={(e) => setFormData({ ...formData, amount: e.target.value })} required />
-          <input type="number" value={formData.interestRate} onChange={(e) => setFormData({ ...formData, interestRate: e.target.value })} required />
-          <input type="number" value={formData.durationMonths} onChange={(e) => setFormData({ ...formData, durationMonths: e.target.value })} required />
-          <input type="date" value={formData.startDate} onChange={(e) => setFormData({ ...formData, startDate: e.target.value })} required />
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Member</label>
+            <select value={formData.memberId} onChange={(e) => setFormData({ ...formData, memberId: e.target.value })} required>
+              <option value="">Select member</option>
+              {members.map((member) => (
+                <option key={member.id} value={member.id}>{member.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Loan amount</label>
+            <input type="number" value={formData.amount} onChange={(e) => setFormData({ ...formData, amount: e.target.value })} required />
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Interest rate (%)</label>
+            <input type="number" value={formData.interestRate} onChange={(e) => setFormData({ ...formData, interestRate: e.target.value })} required />
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Duration (months)</label>
+            <input type="number" value={formData.durationMonths} onChange={(e) => setFormData({ ...formData, durationMonths: e.target.value })} required />
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Start date</label>
+            <input type="date" value={formData.startDate} onChange={(e) => setFormData({ ...formData, startDate: e.target.value })} required />
+          </div>
           {selectedMember ? (
             <div className="md:col-span-2 xl:col-span-5 rounded-[1.5rem] bg-slate-50 p-4">
               <p className="text-sm text-slate-600">Borrower snapshot</p>
@@ -106,7 +153,18 @@ export default function LoansPage() {
       ) : null}
 
       <section className="panel mt-8">
-        <h2 className="text-2xl text-slate-900">Loan Portfolio</h2>
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="section-title">Loan Portfolio</h2>
+            <p className="section-copy">{loading ? 'Loading loan portfolio...' : `${filteredLoans.length} loan records currently visible.`}</p>
+          </div>
+          <select className="md:w-[220px]" value={riskFilter} onChange={(e) => setRiskFilter(e.target.value as 'ALL' | 'LOW' | 'MEDIUM' | 'HIGH')}>
+            <option value="ALL">All risk levels</option>
+            <option value="LOW">Low risk</option>
+            <option value="MEDIUM">Medium risk</option>
+            <option value="HIGH">High risk</option>
+          </select>
+        </div>
         <div className="mt-4 overflow-x-auto">
           <table className="table">
             <thead>
@@ -120,7 +178,7 @@ export default function LoansPage() {
               </tr>
             </thead>
             <tbody>
-              {loans.map((loan) => (
+              {filteredLoans.length ? filteredLoans.map((loan) => (
                 <tr key={loan.id}>
                   <td>
                     <p className="font-semibold text-slate-900">{loan.member?.name}</p>
@@ -139,7 +197,13 @@ export default function LoansPage() {
                     </span>
                   </td>
                 </tr>
-              ))}
+              )) : (
+                <tr>
+                  <td colSpan={6} className="rounded-2xl px-4 py-10 text-center text-sm text-slate-500">
+                    No loan records matched the current filter.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -147,3 +211,7 @@ export default function LoansPage() {
     </AppShell>
   );
 }
+
+export default dynamic(() => Promise.resolve(LoansPage), {
+  ssr: false,
+});
