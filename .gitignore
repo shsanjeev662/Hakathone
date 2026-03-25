@@ -2,3 +2,4 @@
 .postgres-run/
 frontend/tsconfig.tsbuildinfo
 backend/tsconfig.tsbuildinfo
+.netlify/plugins/node_modules/
