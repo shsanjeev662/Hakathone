@@ -6,7 +6,12 @@ import {
   Repayment,
   RepaymentStatus,
 } from "@prisma/client";
-import { calculateOverdueContributions, getOverdueMonthsCount } from "./helpers";
+import {
+  calculateOverdueContributions,
+  getOverdueMonthsCount,
+  calculateOverdueRepayments,
+  getOverdueRepaymentCount,
+} from "./helpers";
 
 export type TrustRiskLevel = "LOW" | "MEDIUM" | "HIGH";
 
@@ -17,9 +22,12 @@ export interface MemberAnalytics {
   contributionConsistency: number;
   overdueContributionAmount: number;
   overdueContributionCount: number;
+  overdueRepaymentAmount: number;
+  overdueRepaymentCount: number;
   overdueCount: number;
   onTimeRepaymentCount: number;
   delayedRepaymentCount: number;
+  totalOverdueAmount: number;
   alerts: Array<{
     type: NotificationType;
     message: string;
@@ -46,7 +54,7 @@ export const computeMemberAnalytics = ({
   const pendingContributions = contributions.filter((item) => item.status === ContributionStatus.PENDING);
 
   const paidRepayments = repayments.filter((item) => item.status === RepaymentStatus.PAID);
-  const overdueRepayments = repayments.filter((item) => item.status === RepaymentStatus.OVERDUE);
+  const overdueRepaymentTransactions = repayments.filter((item) => item.status === RepaymentStatus.OVERDUE);
   const delayedRepayments = paidRepayments.filter(isRepaymentLate);
   const onTimeRepayments = paidRepayments.length - delayedRepayments.length;
 
@@ -67,6 +75,23 @@ export const computeMemberAnalytics = ({
     }))
   );
 
+  // Calculate overdue repayments (including missed payments)
+  const overdueRepaymentAmount = calculateOverdueRepayments(
+    repayments.map((r) => ({
+      amount: r.amount,
+      dueDate: r.dueDate,
+      status: r.status,
+    }))
+  );
+  const overdueRepaymentCount = getOverdueRepaymentCount(
+    repayments.map((r) => ({
+      dueDate: r.dueDate,
+      status: r.status,
+    }))
+  );
+
+  const totalOverdueAmount = overdueContributionAmount + overdueRepaymentAmount;
+
   const contributionConsistency = contributions.length
     ? Math.round((paidContributions.length / contributions.length) * 100)
     : 100;
@@ -76,16 +101,18 @@ export const computeMemberAnalytics = ({
     paidContributions.length * 4 +
     onTimeRepayments * 6 -
     missedContributions.length * 10 -
-    overdueRepayments.length * 12 -
+    overdueRepaymentTransactions.length * 12 -
     delayedRepayments.length * 5 -
     pendingContributions.length * 2 -
-    overdueContributionCount * 5;
+    overdueContributionCount * 5 -
+    overdueRepaymentCount * 5;
 
   const trustScore = clamp(Math.round(scoreRaw), 0, 100);
 
   const riskScore = clamp(
     Math.round(
-      overdueRepayments.length * 22 +
+      overdueRepaymentTransactions.length * 22 +
+        overdueRepaymentCount * 15 +
         delayedRepayments.length * 10 +
         missedContributions.length * 12 +
         overdueContributionCount * 8 +
@@ -103,16 +130,22 @@ export const computeMemberAnalytics = ({
   }
 
   const alerts: MemberAnalytics["alerts"] = [];
-  if (overdueRepayments.length > 0) {
+  if (overdueRepaymentCount > 0) {
     alerts.push({
       type: "ALERT",
-      message: `${overdueRepayments.length} instalment(s) are overdue and need action.`,
+      message: `${overdueRepaymentCount} loan instalment(s) totaling NPR ${Math.round(overdueRepaymentAmount)} are overdue. Immediate payment required.`,
     });
   }
   if (overdueContributionCount > 0) {
     alerts.push({
       type: "ALERT",
       message: `${overdueContributionCount} monthly deposit(s) totaling NPR ${Math.round(overdueContributionAmount)} are overdue.`,
+    });
+  }
+  if (totalOverdueAmount > 0) {
+    alerts.push({
+      type: "ALERT",
+      message: `Total overdue amount: NPR ${Math.round(totalOverdueAmount)} (Contributions: NPR ${Math.round(overdueContributionAmount)}, Loan Payments: NPR ${Math.round(overdueRepaymentAmount)}).`,
     });
   }
   if (riskLevel === "HIGH") {
@@ -135,7 +168,10 @@ export const computeMemberAnalytics = ({
     contributionConsistency,
     overdueContributionAmount: Math.round(overdueContributionAmount * 100) / 100,
     overdueContributionCount,
-    overdueCount: overdueRepayments.length,
+    overdueRepaymentAmount: Math.round(overdueRepaymentAmount * 100) / 100,
+    overdueRepaymentCount,
+    totalOverdueAmount: Math.round(totalOverdueAmount * 100) / 100,
+    overdueCount: overdueRepaymentTransactions.length + overdueRepaymentCount,
     onTimeRepaymentCount: onTimeRepayments,
     delayedRepaymentCount: delayedRepayments.length,
     alerts,

@@ -6,6 +6,8 @@ import {
   calculateOverdueContributions,
   getOverdueMonthsCount,
   isContributionPastDue,
+  calculateOverdueRepayments,
+  getOverdueRepaymentCount,
 } from "../utils/helpers";
 
 export const getDashboardStats = async (req: AuthRequest, res: Response) => {
@@ -45,7 +47,9 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
 
     const activeLoans = members.flatMap((member) => member.loans.filter((loan) => loan.status === "ACTIVE"));
     const allRepayments = activeLoans.flatMap((loan) => loan.repayments);
-    const overdueRepaymentTransactions = allRepayments.filter((item) => item.status === "OVERDUE");
+    const overdueRepaymentTransactions = allRepayments.filter(
+      (item) => item.status === "OVERDUE" || (item.status === "PENDING" && item.dueDate.getTime() < now.getTime())
+    );
     const pendingRepayments = allRepayments.filter((item) => item.status === "PENDING");
     const contributions = members.flatMap((member) => member.contributions);
     const paidContributions = contributions.filter((item) => item.status === "PAID");
@@ -69,7 +73,22 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       }))
     );
 
-    const totalRepaymentOverdueAmount = overdueRepaymentTransactions.reduce((sum, item) => sum + item.amount, 0);
+    // Calculate overdue repayments including missed payments
+    const totalRepaymentOverdueAmount = calculateOverdueRepayments(
+      allRepayments.map((r) => ({
+        amount: r.amount,
+        dueDate: r.dueDate,
+        status: r.status,
+      })),
+      now
+    );
+    const overdueRepaymentCount = getOverdueRepaymentCount(
+      overdueRepaymentTransactions.map((r) => ({
+        dueDate: r.dueDate,
+        status: r.status,
+      })),
+      now
+    );
     const totalOverduePaymentsAmount = totalRepaymentOverdueAmount + totalOverdueContributionAmount;
     const missedContributions = contributions.filter((item) => item.status === "MISSED");
     const memberRisks = members
@@ -99,9 +118,9 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       })
       .sort((a, b) => b.riskScore - a.riskScore);
 
-    const chartMonthlySavings = Array.from({ length: 6 }, (_, index) => {
+    const chartMonthlySavings = Array.from({ length: 12 }, (_, index) => {
       const date = new Date();
-      date.setMonth(date.getMonth() - (5 - index));
+      date.setMonth(date.getMonth() - (11 - index));
       const month = date.getMonth() + 1;
       const year = date.getFullYear();
       const total = contributions
@@ -109,7 +128,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
         .reduce((sum, item) => sum + item.amount, 0);
 
       return {
-        label: date.toLocaleString("en-US", { month: "short" }),
+        label: date.toLocaleString("en-US", { month: "short", year: "2-digit" }),
         total,
       };
     });
@@ -125,12 +144,12 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       totalSavings: paidContributions.reduce((sum, item) => sum + item.amount, 0),
       activeLoans: activeLoans.length,
       totalActiveLoanAmount: activeLoans.reduce((sum, item) => sum + item.amount, 0),
-      overduePayments: overdueRepaymentTransactions.length + overdueContributionTransactions.length,
+      overduePayments: overdueRepaymentCount + overdueContributionCount,
       totalOverdueAmount: Math.round(totalOverduePaymentsAmount * 100) / 100,
       totalRepaymentOverdueAmount: Math.round(totalRepaymentOverdueAmount * 100) / 100,
       totalContributionOverdueAmount: Math.round(totalOverdueContributionAmount * 100) / 100,
-      overdueRepayments: overdueRepaymentTransactions.length,
-      overdueContributions: overdueContributionTransactions.length,
+      overdueRepayments: overdueRepaymentCount,
+      overdueContributions: overdueContributionCount,
       missedContributions: missedContributions.length,
       pendingRepayments: pendingRepayments.length,
       collectionRate: contributions.length
@@ -167,12 +186,12 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
               },
             ]
           : []),
-        ...(overdueRepaymentTransactions.length > 0
+        ...(overdueRepaymentCount > 0
           ? [
               {
                 type: "ALERT",
-                title: "Overdue Repayments",
-                message: `${overdueRepaymentTransactions.length} repayment transaction(s) are overdue totaling NPR ${Math.round(totalRepaymentOverdueAmount)}.`,
+                title: "Overdue Loan Instalments & Missed Payments",
+                message: `${overdueRepaymentCount} loan instalment(s) including missed payment(s) are overdue totaling NPR ${Math.round(totalRepaymentOverdueAmount)}. Immediate collection required.`,
               },
             ]
           : []),

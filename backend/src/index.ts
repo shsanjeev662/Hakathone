@@ -8,6 +8,8 @@ import loanRoutes from "./routes/loans";
 import repaymentRoutes from "./routes/repayments";
 import dashboardRoutes from "./routes/dashboard";
 import reportRoutes from "./routes/reports";
+import savingGoalsRoutes from "./routes/savingGoals";
+import digitalReceiptsRoutes from "./routes/digitalReceipts";
 import { corsMiddleware } from "./middleware/cors";
 import { createRateLimiter } from "./middleware/rateLimit";
 import { authMiddleware, AuthRequest } from "./middleware/auth";
@@ -32,7 +34,7 @@ app.use(
   })
 );
 app.use(
-  ["/api/members", "/api/contributions", "/api/loans", "/api/repayments", "/api/dashboard", "/api/reports"],
+  ["/api/members", "/api/contributions", "/api/loans", "/api/repayments", "/api/dashboard", "/api/reports", "/api/saving-goals", "/api/digital-receipts"],
   authMiddleware,
   createRateLimiter({
     windowMs: securityConfig.rateLimit.userWindowMs,
@@ -50,6 +52,8 @@ app.use("/api/loans", loanRoutes);
 app.use("/api/repayments", repaymentRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/reports", reportRoutes);
+app.use("/api/saving-goals", savingGoalsRoutes);
+app.use("/api/digital-receipts", digitalReceiptsRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {

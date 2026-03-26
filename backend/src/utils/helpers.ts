@@ -105,3 +105,38 @@ export const getOverdueMonthsCount = (
     return isContributionPastDue(contribution.month, contribution.year) && isNotPaid;
   }).length;
 };
+
+export const calculateOverdueRepayments = (
+  repayments: Array<{
+    amount: number;
+    dueDate: Date;
+    status: string;
+  }>,
+  referenceDate = new Date()
+): number => {
+  return repayments
+    .filter((repayment) => {
+      const isOverdueStatus = repayment.status === "OVERDUE";
+      const isPendingAndPastDue =
+        repayment.status === "PENDING" &&
+        repayment.dueDate.getTime() < referenceDate.getTime();
+      return isOverdueStatus || isPendingAndPastDue;
+    })
+    .reduce((sum, item) => sum + item.amount, 0);
+};
+
+export const getOverdueRepaymentCount = (
+  repayments: Array<{
+    dueDate: Date;
+    status: string;
+  }>,
+  referenceDate = new Date()
+): number => {
+  return repayments.filter((repayment) => {
+    const isOverdueStatus = repayment.status === "OVERDUE";
+    const isPendingAndPastDue =
+      repayment.status === "PENDING" &&
+      repayment.dueDate.getTime() < referenceDate.getTime();
+    return isOverdueStatus || isPendingAndPastDue;
+  }).length;
+};

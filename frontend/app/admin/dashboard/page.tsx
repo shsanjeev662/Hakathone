@@ -9,7 +9,7 @@ import FeedbackBanner from '@/components/FeedbackBanner';
 import StatCard from '@/components/StatCard';
 import TrustBadge from '@/components/TrustBadge';
 import { dashboardService, repaymentService } from '@/services';
-import type { DashboardStats } from '@/types';
+import type { DashboardStats, Repayment } from '@/types';
 import { formatCurrency, formatDate } from '@/lib/format';
 
 const tileIcons = {
@@ -50,9 +50,22 @@ const quickActions = [
   { label: 'Review Repayments', href: '/admin/repayments', tone: 'info' as const },
 ];
 
+const financialSummaryRanges = [
+  { label: 'Monthly', value: 1 },
+  { label: '2 Months', value: 2 },
+  { label: '3 Months', value: 3 },
+  { label: '6 Months', value: 6 },
+  { label: '1 Year', value: 12 },
+] as const;
+
+const isRepaymentOverdue = (repayment: Repayment) =>
+  repayment.status === 'OVERDUE' || (repayment.status === 'PENDING' && new Date(repayment.dueDate).getTime() < Date.now());
+
 function AdminDashboard() {
   const router = useRouter();
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [overdueRepayments, setOverdueRepayments] = useState<Repayment[]>([]);
+  const [selectedSummaryRange, setSelectedSummaryRange] = useState<(typeof financialSummaryRanges)[number]['value']>(6);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -60,8 +73,17 @@ function AdminDashboard() {
 
   const fetchStats = async () => {
     try {
-      const statsData = await dashboardService.getStats();
+      const [statsData, repayments] = await Promise.all([
+        dashboardService.getStats(),
+        repaymentService.getAll(),
+      ]);
       setStats(statsData);
+      setOverdueRepayments(
+        repayments
+          .filter(isRepaymentOverdue)
+          .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
+          .slice(0, 6)
+      );
       setError(null);
     } catch (err: any) {
       setError(err.response?.data?.error || err.message);
@@ -94,9 +116,37 @@ function AdminDashboard() {
     }
   };
 
+  const visibleMonthlySavings = useMemo(
+    () => stats?.monthlySavings.slice(-selectedSummaryRange) || [],
+    [selectedSummaryRange, stats]
+  );
+  const selectedRangeLabel = useMemo(
+    () => financialSummaryRanges.find((option) => option.value === selectedSummaryRange)?.label || '6 Months',
+    [selectedSummaryRange]
+  );
   const maxMonthlyValue = useMemo(
-    () => Math.max(...(stats?.monthlySavings.map((item) => item.total) || [1])),
-    [stats]
+    () => Math.max(...(visibleMonthlySavings.map((item) => item.total) || [1])),
+    [visibleMonthlySavings]
+  );
+  const selectedRangeSavingsTotal = useMemo(
+    () => visibleMonthlySavings.reduce((sum, item) => sum + item.total, 0),
+    [visibleMonthlySavings]
+  );
+  const selectedRangeAverage = useMemo(
+    () => (visibleMonthlySavings.length ? selectedRangeSavingsTotal / visibleMonthlySavings.length : 0),
+    [selectedRangeSavingsTotal, visibleMonthlySavings]
+  );
+  const highestMonth = useMemo(
+    () =>
+      visibleMonthlySavings.reduce(
+        (best, item) => (item.total > best.total ? item : best),
+        visibleMonthlySavings[0] || { label: 'N/A', total: 0 }
+      ),
+    [visibleMonthlySavings]
+  );
+  const chartScaleMarks = useMemo(
+    () => [1, 0.75, 0.5, 0.25].map((multiplier) => Math.round(maxMonthlyValue * multiplier)),
+    [maxMonthlyValue]
   );
   const passwordResetRequests = useMemo(
     () =>
@@ -104,6 +154,10 @@ function AdminDashboard() {
         (alert) => alert.title === 'Member Reset Request' || /password reset/i.test(alert.message)
       ),
     [stats]
+  );
+  const overdueBorrowers = useMemo(
+    () => new Set(overdueRepayments.map((repayment) => repayment.loan?.member?.id).filter(Boolean)).size,
+    [overdueRepayments]
   );
 
   if (loading) return <AppShell title="Dashboard">Loading dashboard...</AppShell>;
@@ -168,31 +222,115 @@ function AdminDashboard() {
 
       <section className="mt-6 grid gap-6 xl:grid-cols-[1.55fr_1fr]">
         <div className="panel">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div>
               <h2 className="section-title">Financial Summary</h2>
               <p className="section-copy">Monthly contributions vs loan pressure</p>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">Last 6 months</div>
+            <div className="flex flex-wrap items-center gap-2 rounded-[1.5rem] border border-slate-200 bg-slate-50 p-2">
+              {financialSummaryRanges.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setSelectedSummaryRange(option.value)}
+                  className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
+                    selectedSummaryRange === option.value
+                      ? 'bg-slate-900 text-white shadow-[0_10px_25px_rgba(15,23,42,0.16)]'
+                      : 'text-slate-600 hover:bg-white hover:text-slate-900'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="mt-8">
-            <div className="flex h-[280px] items-end gap-4">
-              {stats.monthlySavings.map((item) => {
-                const barHeight = `${Math.max(18, (item.total / maxMonthlyValue) * 100)}%`;
-                const pressure = stats.totalActiveLoanAmount > 0 ? Math.min(100, (item.total / stats.totalActiveLoanAmount) * 220) : 24;
-                return (
-                  <div key={item.label} className="flex flex-1 flex-col items-center gap-3">
-                    <div className="flex h-full w-full items-end justify-center gap-2 rounded-2xl bg-slate-50 p-3">
-                      <div className="w-1/2 rounded-xl bg-[linear-gradient(180deg,#14b8a6_0%,#0f766e_100%)]" style={{ height: barHeight }} />
-                      <div className="w-1/2 rounded-xl bg-[linear-gradient(180deg,#ffbb59_0%,#ff9f34_100%)]" style={{ height: `${Math.max(16, pressure)}%` }} />
-                    </div>
-                    <div className="text-center">
-                      <p className="text-sm font-semibold text-slate-700">{item.label}</p>
-                      <p className="text-xs text-slate-500">{formatCurrency(item.total)}</p>
-                    </div>
+          <div className="mt-6 grid gap-3 md:grid-cols-3">
+            <div className="rounded-2xl border border-teal-200 bg-teal-50 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-teal-700">Selected total</p>
+              <p className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-teal-950">{formatCurrency(selectedRangeSavingsTotal)}</p>
+              <p className="mt-1 text-sm text-teal-800/80">{selectedRangeLabel} contribution total</p>
+            </div>
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-700">Monthly average</p>
+              <p className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-amber-950">{formatCurrency(selectedRangeAverage)}</p>
+              <p className="mt-1 text-sm text-amber-800/80">Average collected per month</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Loan pressure</p>
+              <p className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-900">{formatCurrency(stats.totalActiveLoanAmount)}</p>
+              <p className="mt-1 text-sm text-slate-600">Compared against active loan exposure</p>
+            </div>
+          </div>
+          <div className="mt-8 rounded-[1.75rem] border border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] p-5">
+            <div className="flex flex-col gap-4 border-b border-slate-200 pb-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">Collection Trend Graph</p>
+                <p className="mt-1 text-sm text-slate-500">Compare monthly savings with portfolio pressure across the selected window.</p>
+              </div>
+              <div className="flex flex-wrap gap-3 text-xs font-medium text-slate-600">
+                <span className="inline-flex items-center gap-2 rounded-full bg-teal-50 px-3 py-1.5 text-teal-800">
+                  <span className="h-2.5 w-2.5 rounded-full bg-teal-600" />
+                  Savings collected
+                </span>
+                <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1.5 text-amber-800">
+                  <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
+                  Loan pressure index
+                </span>
+              </div>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-2xl bg-slate-950 px-4 py-4 text-white">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-300">Peak month</p>
+                <p className="mt-2 text-2xl font-semibold tracking-[-0.04em]">{formatCurrency(highestMonth.total)}</p>
+                <p className="mt-1 text-sm text-slate-300">{highestMonth.label}</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Chart ceiling</p>
+                <p className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-900">{formatCurrency(maxMonthlyValue)}</p>
+                <p className="mt-1 text-sm text-slate-500">Highest monthly collection in the selected range</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Range view</p>
+                <p className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-900">{visibleMonthlySavings.length}</p>
+                <p className="mt-1 text-sm text-slate-500">Month(s) plotted in this graph</p>
+              </div>
+            </div>
+            <div className="mt-6 grid gap-4 lg:grid-cols-[72px_1fr]">
+              <div className="hidden h-[320px] lg:flex lg:flex-col lg:justify-between">
+                {chartScaleMarks.map((mark) => (
+                  <div key={mark} className="text-right text-xs font-medium text-slate-400">
+                    {formatCurrency(mark)}
                   </div>
-                );
-              })}
+                ))}
+              </div>
+              <div className="relative">
+                <div className="pointer-events-none absolute inset-0 flex flex-col justify-between">
+                  {chartScaleMarks.map((mark) => (
+                    <div key={mark} className="border-t border-dashed border-slate-200" />
+                  ))}
+                </div>
+                <div className={`relative flex h-[320px] items-end gap-3 ${visibleMonthlySavings.length > 6 ? 'overflow-x-auto pb-2' : ''}`}>
+                  {visibleMonthlySavings.map((item) => {
+                    const barHeight = `${Math.max(18, (item.total / maxMonthlyValue) * 100)}%`;
+                    const pressure = stats.totalActiveLoanAmount > 0 ? Math.min(100, (item.total / stats.totalActiveLoanAmount) * 220) : 24;
+                    return (
+                      <div
+                        key={item.label}
+                        className={`flex min-w-0 flex-1 flex-col items-center gap-3 ${visibleMonthlySavings.length > 6 ? 'min-w-[72px]' : ''}`}
+                      >
+                        <div className="flex h-full w-full items-end justify-center gap-2 rounded-[1.5rem] border border-slate-200 bg-white/90 p-3 shadow-[0_16px_30px_rgba(15,23,42,0.05)]">
+                          <div className="w-1/2 rounded-xl bg-[linear-gradient(180deg,#14b8a6_0%,#0f766e_100%)] shadow-[0_12px_24px_rgba(20,184,166,0.22)]" style={{ height: barHeight }} />
+                          <div className="w-1/2 rounded-xl bg-[linear-gradient(180deg,#ffd074_0%,#f59e0b_100%)] shadow-[0_12px_24px_rgba(245,158,11,0.2)]" style={{ height: `${Math.max(16, pressure)}%` }} />
+                        </div>
+                        <div className="text-center">
+                          <p className="text-sm font-semibold text-slate-700">{item.label}</p>
+                          <p className="text-xs text-slate-500">{formatCurrency(item.total)}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -346,6 +484,61 @@ function AdminDashboard() {
                   <td>{formatDate(loan.nextDueDate)}</td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="mt-6 panel">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="section-title">Overdue Payments</h2>
+            <p className="section-copy">Borrowers needing immediate repayment follow-up.</p>
+          </div>
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+            {stats.overdueRepayments} overdue instalment(s) across {overdueBorrowers} borrower(s)
+          </div>
+        </div>
+        <div className="mt-5 overflow-x-auto">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Borrower</th>
+                <th>Trust</th>
+                <th>Instalment</th>
+                <th>Due Date</th>
+                <th>Loan</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {overdueRepayments.length ? overdueRepayments.map((repayment) => (
+                <tr key={repayment.id}>
+                  <td>
+                    <p className="font-semibold text-slate-900">{repayment.loan?.member?.name || 'Unknown member'}</p>
+                    <p className="text-xs text-slate-500">{repayment.loan?.member?.email || 'No email available'}</p>
+                  </td>
+                  <td><TrustBadge score={repayment.loan?.member?.memberProfile?.trustScore ?? 0} /></td>
+                  <td>
+                    <p>{formatCurrency(repayment.amount)}</p>
+                    <p className="text-xs text-slate-500">Instalment {repayment.installmentNumber}</p>
+                  </td>
+                  <td>{formatDate(repayment.dueDate)}</td>
+                  <td>
+                    <p className="font-medium text-slate-800">{repayment.loan?.id?.slice(0, 8) || 'Unknown'}</p>
+                    <p className="text-xs text-slate-500">{formatCurrency(repayment.loan?.amount ?? 0)}</p>
+                  </td>
+                  <td>
+                    <span className="badge badge-danger">{repayment.status}</span>
+                  </td>
+                </tr>
+              )) : (
+                <tr>
+                  <td colSpan={6} className="py-6 text-center text-sm text-slate-500">
+                    No overdue repayments are currently listed.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
